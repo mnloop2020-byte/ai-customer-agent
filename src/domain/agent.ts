@@ -19,6 +19,7 @@ import { buildSalesPlaybook, type SalesPlaybookStep } from "@/domain/agent/sales
 import { assessSmartEscalation, type SmartEscalationResult } from "@/domain/agent/escalation-engine";
 import { buildValuePlan, type ValuePlan } from "@/domain/agent/value-engine";
 import { mergeStageMemory, readAgentStageMemory, shouldFreezeForward, type AgentStageMemory } from "@/domain/agent/stage-memory";
+import { buildResponseContract, type AgentResponseContract } from "@/domain/agent/response-contract";
 
 const channelSchema = z.enum(["WEB_CHAT", "WHATSAPP", "EMAIL", "INSTAGRAM", "FACEBOOK", "PHONE"]);
 const customerTypeSchema = z.enum(["INDIVIDUAL", "BUSINESS"]);
@@ -29,6 +30,7 @@ const conversationMemorySchema = z.object({
   body: z.string().min(1),
 });
 const semanticIntentNameSchema = z.enum([
+  "GREETING",
   "ASK_PRICE",
   "ASK_QUOTE",
   "ASK_LOCATION",
@@ -183,6 +185,7 @@ export type AgentDecision = {
   confidence: ConfidenceResult;
   smartEscalation: SmartEscalationResult;
   valuePlan: ValuePlan;
+  responseContract: AgentResponseContract;
   stageMemory: AgentStageMemory;
   qualificationSignals: string[];
   missingFields: string[];
@@ -433,6 +436,21 @@ export function analyzeIncomingMessage(input: IncomingMessage): AgentDecision {
       (!directAnswerIntent && (nextAction === "EXPLAIN_VALUE" || nextAction === "PRESENT_VALUE_OR_OFFER")),
     valueExplained: offerGuard.valueExplained || (!directAnswerIntent && nextAction === "PRESENT_VALUE_OR_OFFER"),
   });
+  const responseContract = buildResponseContract({
+    customerMessage: parsed.body,
+    intent,
+    directAnswerIntents,
+    route,
+    nextAction,
+    conversationStage: conversationState.phase,
+    allowOffer: effectiveOfferGuard.allowOffer,
+    allowPrice: effectiveOfferGuard.allowPrice,
+    allowDemo: effectiveOfferGuard.allowDemo,
+    missingFields,
+    problemConfirmed: offerGuard.problemConfirmed,
+    valueExplained: offerGuard.valueExplained,
+    objectionType: objection.type,
+  });
 
   logDecisionFlow({
     currentMessage: parsed.body,
@@ -461,6 +479,7 @@ export function analyzeIncomingMessage(input: IncomingMessage): AgentDecision {
     }),
     missingFields,
     focusField,
+    responseContract,
   });
 
   return {
@@ -488,6 +507,7 @@ export function analyzeIncomingMessage(input: IncomingMessage): AgentDecision {
     confidence,
     smartEscalation,
     valuePlan,
+    responseContract,
     stageMemory,
     qualificationSignals,
     missingFields,
@@ -534,6 +554,7 @@ function logDecisionFlow(payload: {
   backwardTransitionBlocked: boolean;
   missingFields: string[];
   focusField?: AskedField;
+  responseContract: AgentResponseContract;
 }) {
   if (process.env.AGENT_DEBUG !== "1" && process.env.NODE_ENV !== "development") return;
 
@@ -609,6 +630,7 @@ function semanticIntentToDirectAnswer(intent: SemanticIntentName): DirectAnswerI
 }
 
 function mapSemanticIntentToLegacyIntent(intent: SemanticIntentName) {
+  if (intent === "GREETING") return "Greeting";
   if (intent === "ASK_PRICE") return "Price Inquiry";
   if (intent === "ASK_QUOTE") return "Quote Request";
   if (intent === "ASK_LOCATION") return "Location Question";
@@ -654,6 +676,7 @@ function phaseFromNextAction(nextAction: AgentNextAction, route: AgentDecision["
 
 function detectIntent(message: string) {
   if (isUnclearShortReply(message)) return "Unclear Reply";
+  if (isPureGreetingMessage(message)) return "Greeting";
   if (requestsAnswerWithoutQuestion(message)) return "Direct Explanation Request";
   if (containsPattern(message, ["مصادر المعرفة", "تعتمد في ردك", "المعلومات التي استخدمتها", "لماذا اخترت هذا السؤال", "ليش اخترت هذا السؤال"])) return "Answer Reason Question";
   if (isCustomQuoteRequest(message)) return "Custom Quote";
@@ -673,6 +696,19 @@ function detectIntent(message: string) {
   if (containsPattern(message, ["العرض السابق", "تواصلنا", "متابعة", "رجعت", "الطلب السابق"])) return "Follow-up";
 
   return "General Inquiry";
+}
+
+function isPureGreetingMessage(message: string) {
+  const normalized = normalize(message);
+  const compact = normalized.replace(/\s+/g, "");
+  const wordCount = normalized.split(/\s+/).filter(Boolean).length;
+
+  if (/^(hi|hello|hey)$/iu.test(normalized)) return true;
+  if (/^(السلامعليكم|السلاموعليكم|سلامعليكم|سلاموعليكم|وعليكمالسلام|مرحبا|اهلا|أهلا|هلا|ياهلا)$/u.test(compact)) {
+    return true;
+  }
+
+  return /^(السلام|سلام|مرحبا|اهلا|أهلا|هلا)\b/u.test(normalized) && wordCount <= 4;
 }
 
 function isPriceInquiry(message: string) {
@@ -930,6 +966,8 @@ function chooseRoute(
   if (lostDeal) return "DISQUALIFY";
   if (containsPattern(normalized, directHandoffKeywords)) return "HUMAN_HANDOFF";
   if (qualificationStatus === "DISQUALIFIED") return "DISQUALIFY";
+
+  if (intent === "Greeting" && isPureGreetingMessage(rawMessage)) return "DIRECT_ANSWER";
 
   if (
     ["Greeting", "Capabilities Question"].includes(intent) &&

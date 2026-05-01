@@ -3,6 +3,11 @@ import type { CompanyProfile } from "@/domain/company";
 import type { KnowledgeSearchResult } from "@/domain/knowledge";
 import { humanizeAgentReply } from "@/domain/agent/humanize-response";
 import { buildRegenerationInstruction, validateFinalReply } from "@/domain/agent/response-policy";
+import {
+  buildContractFallbackReply,
+  resolveResponseContent,
+  type ResolvedResponseContent,
+} from "@/domain/agent/content-resolver";
 
 export type ConversationMemoryMessage = {
   sender: "CUSTOMER" | "AI" | "HUMAN" | "SYSTEM";
@@ -27,6 +32,11 @@ const SAFE_FALLBACK_REPLY = "خلني أوضح لك بشكل أبسط. كيف ت
 
 export async function generateAgentReply(input: GenerateReplyInput): Promise<GeneratedReply> {
   const provider = process.env.AI_PROVIDER ?? "mock";
+  const content = resolveResponseContent({
+    contract: input.decision.responseContract,
+    companyProfile: input.companyProfile,
+    knowledgeResults: input.knowledgeResults,
+  });
   let correction: string | undefined;
   let lastGenerated: GeneratedReply | null = null;
   let providerFailed = false;
@@ -35,7 +45,7 @@ export async function generateAgentReply(input: GenerateReplyInput): Promise<Gen
   for (let attempt = 0; attempt <= MAX_REGENERATION_ATTEMPTS; attempt += 1) {
     try {
       logProviderAttempt({ attempt, provider, hasCorrection: Boolean(correction) });
-      const generated = await generateWithProviderFallback(input, provider, correction);
+      const generated = await generateWithProviderFallback(input, provider, correction, content);
       lastGenerated = generated;
 
       const polished = humanizeAgentReply({
@@ -43,7 +53,12 @@ export async function generateAgentReply(input: GenerateReplyInput): Promise<Gen
         strategy: input.decision.personalizationStrategy,
         ctaPrompt: input.decision.cta.prompt,
       });
-      const validation = validateFinalReply({ text: polished, decision: input.decision });
+      const validation = validateFinalReply({
+        text: polished,
+        decision: input.decision,
+        contract: input.decision.responseContract,
+        content,
+      });
 
       logValidationStep({
         attempt,
@@ -88,18 +103,24 @@ export async function generateAgentReply(input: GenerateReplyInput): Promise<Gen
     }
   }
 
-  logFinalResponse(SAFE_FALLBACK_REPLY);
+  const contractFallback = buildContractFallbackReply({
+    contract: input.decision.responseContract,
+    content,
+    customerFacts: input.decision.personalizationStrategy.mustMentionFacts,
+  }) || SAFE_FALLBACK_REPLY;
+
+  logFinalResponse(contractFallback);
   debugAgentReply({
     decision: input.decision,
     selectedCta: input.decision.cta.prompt,
     rawReply: lastGenerated?.text ?? (providerFailed ? "provider_failed" : "validation_failed"),
-    finalReply: SAFE_FALLBACK_REPLY,
+    finalReply: contractFallback,
     correction,
     validationFailures: providerFailed ? [`provider_failed:${formatProviderError(lastProviderError)}`] : ["regeneration_exhausted"],
   });
 
   return {
-    text: SAFE_FALLBACK_REPLY,
+    text: contractFallback,
     provider: `${lastGenerated?.provider ?? provider}:safe-fallback`,
   };
 }
@@ -115,19 +136,24 @@ function logProviderAttempt({ attempt, provider, hasCorrection }: { attempt: num
   });
 }
 
-async function generateWithProvider(input: GenerateReplyInput, provider: string, correction?: string) {
-  if (provider === "gemini") return generateWithGemini(input, correction);
-  if (provider === "groq") return generateWithGroq(input, correction);
-  return generateWithMock(input, correction);
+async function generateWithProvider(input: GenerateReplyInput, provider: string, correction: string | undefined, content: ResolvedResponseContent) {
+  if (provider === "gemini") return generateWithGemini(input, correction, content);
+  if (provider === "groq") return generateWithGroq(input, correction, content);
+  return generateWithMock(input, correction, content);
 }
 
-async function generateWithProviderFallback(input: GenerateReplyInput, preferredProvider: string, correction?: string) {
+async function generateWithProviderFallback(
+  input: GenerateReplyInput,
+  preferredProvider: string,
+  correction: string | undefined,
+  content: ResolvedResponseContent,
+) {
   const providers = getProviderFallbackOrder(preferredProvider);
   const failures: string[] = [];
 
   for (const provider of providers) {
     try {
-      return await generateWithProvider(input, provider, correction);
+      return await generateWithProvider(input, provider, correction, content);
     } catch (error) {
       failures.push(`${provider}:${formatProviderError(error)}`);
       logProviderFailure(provider, error);
@@ -193,8 +219,20 @@ function logValidationStep({
   });
 }
 
-async function generateWithMock(input: GenerateReplyInput, correction?: string): Promise<GeneratedReply> {
+async function generateWithMock(
+  input: GenerateReplyInput,
+  correction: string | undefined,
+  content: ResolvedResponseContent,
+): Promise<GeneratedReply> {
   const decision = input.decision;
+  const contractReply = buildMockReplyFromContract(input, content);
+
+  if (contractReply && !correction) {
+    return {
+      text: contractReply,
+      provider: "mock-llm:contract",
+    };
+  }
 
   if (correction?.includes("Do not ask any question") || decision.intent === "Direct Explanation Request") {
     return {
@@ -324,6 +362,54 @@ async function generateWithMock(input: GenerateReplyInput, correction?: string):
   };
 }
 
+function buildMockReplyFromContract(input: GenerateReplyInput, content: ResolvedResponseContent) {
+  const contract = input.decision.responseContract;
+  const needs = new Set(contract.mustAnswer);
+
+  if (input.decision.intent === "Answer Reason Question") {
+    return "أعتمد على معلومات الشركة المعتمدة وما يذكره العميل أثناء المحادثة. في حالتنا الخدمة تنظم محادثات العملاء وتساعد على اختيار الخطوة التالية بدون تكرار.";
+  }
+  if (needs.has("greeting")) return "وعليكم السلام، أهلًا بك.";
+  if (needs.has("identity")) return content.identity;
+  if (needs.has("price") && needs.has("whatsapp")) {
+    const how = needs.has("how_it_works") ? " يعمل بتنظيم المحادثات والردود من معرفة الشركة." : "";
+    return `الأسعار الحالية: ${content.pricing}. وبالنسبة لواتساب، ${content.whatsapp}${how}`;
+  }
+  if (needs.has("price")) return `الأسعار الحالية: ${content.pricing}.`;
+  if (needs.has("quote")) return `الخيارات المتاحة حاليًا: ${content.quote}.`;
+  if (needs.has("location")) return `موقعنا في ${content.location}.`;
+  if (needs.has("whatsapp")) return content.whatsapp;
+  if (needs.has("custom_quote_handoff")) return content.handoff;
+  if (needs.has("clarification")) return "ما فهمت قصدك تمامًا. ممكن توضحها بجملة قصيرة؟";
+  if (needs.has("service") && needs.has("how_it_works")) return `${content.service}. ${content.howItWorks}`;
+  if (needs.has("how_it_works")) return `ينظم الرسائل والمحادثات، يرد على الأسئلة المتكررة من معرفة الشركة، ويحول الحالات المهمة إلى متابعة أو مندوب.`;
+  if (needs.has("service")) return `نقدم خدمة تساعدك على إدارة محادثات العملاء والردود والمتابعة. ينظم الرسائل والمحادثات ويرد على الأسئلة المتكررة من معرفة الشركة.`;
+  if (needs.has("objection")) {
+    return "أتفهم ملاحظتك. الأهم نقيس السعر مقابل الوقت والضغط الذي يقلله النظام، خصوصًا عند وجود رسائل متكررة ومتابعات كثيرة.";
+  }
+  if (needs.has("qualification_question")) {
+    if (contract.nextAction === "ASK_MESSAGES_PER_DAY") {
+      return "النظام يساعد على تنظيم محادثات العملاء وتسريع الردود بدل تراكمها. تقريبًا كم رسالة تستقبلون يوميًا؟";
+    }
+    if (contract.nextAction === "ASK_TEAM_SIZE") {
+      const facts = input.decision.personalizationStrategy.mustMentionFacts.slice(0, 1).join(" و");
+      return `ممتاز، ${facts ? `${facts} عدد مناسب للبدء. ` : ""}النظام يساعدك تنظم الردود وتوفر وقتك. هل ترد على العملاء بنفسك حاليًا أم عندك فريق؟`;
+    }
+    if (contract.nextAction === "CONFIRM_PROBLEM") {
+      const facts = input.decision.personalizationStrategy.mustMentionFacts.slice(0, 2).join(" و");
+      return `${facts ? `مع ${facts}، ` : ""}هل تواجهون تأخير في الرد أو ضغط واضح وقت الزحمة؟`;
+    }
+  }
+  if (needs.has("value")) {
+    const facts = input.decision.personalizationStrategy.mustMentionFacts.slice(0, 2).join(" و");
+    return `${facts ? `مع ${facts}، ` : ""}النظام يرتب المحادثات والأسئلة المتكررة، يوفر وقتك، ويقلل الضغط حتى تركز على العملاء الجاهزين. أقدر أوضح لك طريقة البدء بخطوتين.`;
+  }
+  if (needs.has("offer")) return "الخيار الأنسب هو البدء بالباقة المناسبة لحجم المحادثات، مع متابعة واضحة لقياس النتائج.";
+  if (needs.has("start_cta")) return "ممتاز، نقدر نبدأ بخطوة بسيطة: نراجع بيانات الشركة والخدمة المطلوبة ثم نجهز المساعد على نفس المعلومات.";
+
+  return undefined;
+}
+
 function debugAgentReply({
   decision,
   selectedCta,
@@ -349,6 +435,7 @@ function debugAgentReply({
     directAnswerIntent: decision.directAnswerIntent,
     directAnswerIntents: decision.directAnswerIntents,
     intentOverride: Boolean(decision.directAnswerIntent),
+    responseContract: decision.responseContract,
     messagesPerDay: decision.messagesPerDay,
     teamSize: decision.teamSize,
     problemConfirmed: decision.problemConfirmed,
@@ -370,13 +457,17 @@ function debugAgentReply({
   });
 }
 
-async function generateWithGemini(input: GenerateReplyInput, correction?: string): Promise<GeneratedReply> {
+async function generateWithGemini(
+  input: GenerateReplyInput,
+  correction: string | undefined,
+  content: ResolvedResponseContent,
+): Promise<GeneratedReply> {
   const apiKey = process.env.GEMINI_API_KEY;
   const model = process.env.GEMINI_MODEL ?? "gemini-2.0-flash";
 
   if (!apiKey) throw new Error("GEMINI_API_KEY is missing");
 
-  const prompt = buildPrompt(input, correction);
+  const prompt = buildPrompt(input, correction, content);
   logFinalPrompt(`gemini:${model}`, prompt);
 
   const response = await fetch(
@@ -406,13 +497,17 @@ async function generateWithGemini(input: GenerateReplyInput, correction?: string
   return { text, provider: `gemini:${model}` };
 }
 
-async function generateWithGroq(input: GenerateReplyInput, correction?: string): Promise<GeneratedReply> {
+async function generateWithGroq(
+  input: GenerateReplyInput,
+  correction: string | undefined,
+  content: ResolvedResponseContent,
+): Promise<GeneratedReply> {
   const apiKey = process.env.GROQ_API_KEY;
   const model = process.env.GROQ_MODEL ?? "llama-3.3-70b-versatile";
 
   if (!apiKey) throw new Error("GROQ_API_KEY is missing");
 
-  const messages = buildGroqMessages(input, correction);
+  const messages = buildGroqMessages(input, correction, content);
   logFinalPrompt(`groq:${model}`, JSON.stringify(messages, null, 2));
 
   const response = await fetch("https://api.groq.com/openai/v1/chat/completions", {
@@ -439,7 +534,7 @@ async function generateWithGroq(input: GenerateReplyInput, correction?: string):
   return { text, provider: `groq:${model}` };
 }
 
-function buildGroqMessages(input: GenerateReplyInput, correction?: string) {
+function buildGroqMessages(input: GenerateReplyInput, correction: string | undefined, content: ResolvedResponseContent) {
   const history = (input.conversationHistory ?? []).slice(-8).map((message) => ({
     role: message.sender === "CUSTOMER" ? ("user" as const) : ("assistant" as const),
     content: message.body,
@@ -448,12 +543,12 @@ function buildGroqMessages(input: GenerateReplyInput, correction?: string) {
   return [
     { role: "system" as const, content: buildSystemPrompt(input.companyProfile, Boolean(input.knowledgeResults?.length)) },
     ...history,
-    { role: "user" as const, content: buildUserPrompt(input) },
+    { role: "user" as const, content: buildUserPrompt(input, content) },
     ...(correction ? [{ role: "user" as const, content: correction }] : []),
   ];
 }
 
-function buildPrompt(input: GenerateReplyInput, correction?: string) {
+function buildPrompt(input: GenerateReplyInput, correction: string | undefined, content: ResolvedResponseContent) {
   const history = input.conversationHistory?.length
     ? input.conversationHistory
         .slice(-8)
@@ -467,7 +562,7 @@ function buildPrompt(input: GenerateReplyInput, correction?: string) {
     "Conversation history:",
     history,
     "",
-    buildUserPrompt(input),
+    buildUserPrompt(input, content),
     ...(correction ? ["", correction] : []),
   ].join("\n");
 }
@@ -543,9 +638,21 @@ function buildDirectAnswerRule(decision: AgentDecision) {
   return "none";
 }
 
-function buildUserPrompt({ customerMessage, decision, knowledgeResults = [] }: GenerateReplyInput) {
+function buildUserPrompt({ customerMessage, decision, knowledgeResults = [] }: GenerateReplyInput, content: ResolvedResponseContent) {
   return [
     `Current customer message: ${customerMessage}`,
+    "",
+    "Response Contract. This is the single source of truth for what to answer:",
+    JSON.stringify(decision.responseContract, null, 2),
+    "",
+    "Resolved content. Use this as content only; do not let it change the response contract:",
+    JSON.stringify(content, null, 2),
+    "",
+    "Rules:",
+    "- The LLM only writes the wording. It must not choose a different route or stage.",
+    "- Answer every mustAnswer item in the Response Contract.",
+    "- Avoid every forbidden item in the Response Contract.",
+    "- If the contract is DIRECT_ANSWER, answer the customer's direct question before any sales flow.",
     "",
     "Decision context. Use this as strategy and constraints only; do not expose labels to the customer:",
     `Intent: ${decision.intent}`,

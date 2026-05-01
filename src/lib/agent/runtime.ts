@@ -83,6 +83,28 @@ export async function runAgentTurn({ companyId, companyProfile, message }: RunAg
     conversationHistory,
     knowledgeResults,
   });
+  logAgentTurn({
+    customerMessage: message.body,
+    semanticIntents: semanticIntent.intents,
+    selectedRoute: decision.route,
+    currentStage: decision.conversationStage,
+    previousStage: decision.stageMemory.conversationStage,
+    nextAction: decision.nextAction,
+    responseContract: decision.responseContract,
+    mustAnswer: decision.responseContract.mustAnswer,
+    forbidden: decision.responseContract.forbidden,
+    contentResolved: {
+      hasKnowledge: knowledgeResults.length > 0,
+      sources: knowledgeResults.map((result) => result.documentTitle),
+    },
+    providerUsed: generated.provider,
+    validationResult: generated.provider.includes("validated") ? "OK" : generated.provider,
+    finalSource: generated.provider.includes("safe-fallback")
+      ? "SAFE_FALLBACK"
+      : generated.provider.includes("validated")
+        ? "LLM_OR_REGENERATED"
+        : generated.provider,
+  });
   const leadScore = decision.absoluteScore;
   const leadStatus = statusFromTemperature(decision.temperature);
   const { toolCalls, booking, followUp } = await executeAgentTools({
@@ -215,4 +237,9 @@ function statusFromTemperature(temperature: string) {
   if (temperature === "Warm") return "WARM";
   if (temperature === "Cold") return "COLD";
   return "UNQUALIFIED";
+}
+
+function logAgentTurn(payload: Record<string, unknown>) {
+  if (process.env.AGENT_DEBUG !== "1" && process.env.NODE_ENV !== "development") return;
+  console.log("[AI_AGENT_TURN]", payload);
 }

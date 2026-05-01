@@ -1,5 +1,7 @@
 import type { AgentDecision } from "@/domain/agent";
 import type { PersonalizationStrategy } from "@/domain/agent/customer-context";
+import type { ResolvedResponseContent } from "@/domain/agent/content-resolver";
+import type { AgentResponseContract, ResponseForbidden, ResponseRequirement } from "@/domain/agent/response-contract";
 
 export type ReplyValidationCode =
   | "OK"
@@ -56,14 +58,19 @@ const blockedOfferPatterns = [
 export function validateFinalReply(input: {
   text: string;
   decision: AgentDecision;
+  contract?: AgentResponseContract;
+  content?: ResolvedResponseContent;
 }): ReplyValidationResult {
   const text = sanitizeLanguage(input.text);
   const violations: string[] = [];
   const decision = input.decision;
+  const contract = input.contract ?? decision.responseContract;
 
   if (!text || text.length < 8) {
     violations.push("empty_or_too_short");
   }
+
+  violations.push(...validateResponseContract({ text, decision, contract, content: input.content }));
 
   if (disallowedCustomerFacingPatterns.some((pattern) => pattern.test(text))) {
     violations.push("customer_facing_internal_or_robotic_phrase");
@@ -73,7 +80,7 @@ export function validateFinalReply(input: {
     violations.push("generic_reply_while_customer_context_exists");
   }
 
-  if (decision.intent === "Direct Explanation Request" && containsQuestion(text)) {
+  if ((decision.intent === "Direct Explanation Request" || contract.forbidden.includes("qualification_question")) && containsQuestion(text)) {
     violations.push("question_blocked_by_customer_instruction");
   }
 
@@ -82,7 +89,10 @@ export function validateFinalReply(input: {
     violations.push(`repeated_question:${repeatedQuestion}`);
   }
 
-  if (isOfferBlocked(decision.personalizationStrategy) && containsBlockedOfferLanguage(text)) {
+  if (
+    (isOfferBlocked(decision.personalizationStrategy) || contract.forbidden.includes("price") || contract.forbidden.includes("offer")) &&
+    containsBlockedOfferLanguage(text)
+  ) {
     violations.push("offer_or_price_before_allowed_stage");
   }
 
@@ -127,6 +137,8 @@ export function buildRegenerationInstruction(decision: AgentDecision, violations
     "Rewrite the assistant reply in Arabic.",
     "The previous reply failed validation.",
     `Validation failures: ${violations.join(", ")}`,
+    `Response Contract: ${JSON.stringify(decision.responseContract)}`,
+    "The response contract is the final authority. Satisfy every mustAnswer item and avoid every forbidden item.",
     "Do not mention validation, policy, system, model, prompt, route, score, or internal analysis.",
     "Use the customer's latest message as the main driver of the reply.",
     "Do not use these phrases: من كلامك / بما أنك ذكرت / هذه المعلومة تساعدنا / بدل رد عام.",
@@ -169,6 +181,98 @@ export function buildRegenerationInstruction(decision: AgentDecision, violations
   }
 
   return instructions.join("\n");
+}
+
+function validateResponseContract(input: {
+  text: string;
+  decision: AgentDecision;
+  contract: AgentResponseContract;
+  content?: ResolvedResponseContent;
+}) {
+  const violations: string[] = [];
+  const text = input.text;
+
+  for (const requirement of input.contract.mustAnswer) {
+    if (!satisfiesRequirement(requirement, text, input.decision, input.content)) {
+      violations.push(`missing_contract_requirement:${requirement}`);
+    }
+  }
+
+  for (const forbidden of input.contract.forbidden) {
+    if (violatesForbidden(forbidden, text, input.decision)) {
+      violations.push(`violates_contract_forbidden:${forbidden}`);
+    }
+  }
+
+  const questionCount = (text.match(/[؟?]/gu) ?? []).length;
+  if (questionCount > input.contract.maxQuestions) {
+    violations.push("too_many_questions_for_contract");
+  }
+
+  return violations;
+}
+
+function satisfiesRequirement(
+  requirement: ResponseRequirement,
+  text: string,
+  decision: AgentDecision,
+  content?: ResolvedResponseContent,
+): boolean {
+  const normalized = normalize(text);
+
+  if (requirement === "greeting") return /السلام|اهلا|أهلا|مرحبا|وعليكم/u.test(text) || normalized.includes("ط§ظ„ط³ظ„ط§ظ…") || normalized.includes("ط§ظ‡ظ„ط§") || normalized.includes("ظ…ط±ط­ط¨ط§");
+  if (requirement === "identity") return normalized.includes("ظ…ط³ط§ط¹ط¯") || normalized.includes("mntechnique") || text.includes("مساعد");
+  if (requirement === "price") return /\$\s*\d|\d+\s*\$/u.test(text) || /السعر|الأسعار|اسعار|تكلفة|باقة/u.test(text) || normalized.includes("ط§ظ„ط³ط¹ط±") || normalized.includes("ط§ظ„ط§ط³ط¹ط§ط±") || text.includes("100") || text.includes("300") || includesContentTerm(text, content?.pricing);
+  if (requirement === "quote") return satisfiesRequirement("price", text, decision, content) || normalized.includes("ط¨ط§ظ‚ط©") || normalized.includes("ط®ظٹط§ط±");
+  if (requirement === "location") return includesContentTerm(text, content?.location) || /موقع|اسطنبول|تركيا|نقدم الخدمة من/u.test(text) || normalized.includes("ظ…ظˆظ‚ط¹") || normalized.includes("ط§ط³ط·ظ†ط¨ظˆظ„") || normalized.includes("طھط±ظƒظٹط§");
+  if (requirement === "service") return containsValue(text) || includesContentTerm(text, content?.service) || /خدمة|عملاء|محادثات|ردود/u.test(text) || normalized.includes("ط®ط¯ظ…ط©") || normalized.includes("ط§ظ„ط¹ظ…ظ„ط§ط،");
+  if (requirement === "how_it_works") return containsValue(text) || /يعمل|يشتغل|ينظم|يرد|يحول/u.test(text) || normalized.includes("ظٹط¹ظ…ظ„") || normalized.includes("ظٹط´طھط؛ظ„") || normalized.includes("ظٹظ†ط¸ظ…") || normalized.includes("ظٹط±ط¯");
+  if (requirement === "whatsapp") return /whats\s*app|whatsapp|واتساب|واتس/iu.test(text) || normalized.includes("ظˆط§طھط³");
+  if (requirement === "qualification_question") return containsQuestion(text);
+  if (requirement === "value") return containsValue(text);
+  if (requirement === "offer") return normalized.includes("ط¨ط§ظ‚ط©") || normalized.includes("ط§ظ„ط®ظٹط§ط±") || normalized.includes("ط§ظ„ط£ظ†ط³ط¨") || Boolean(decision.recommendedOffer && text.includes(decision.recommendedOffer.offerName));
+  if (requirement === "objection") return /أتفهم|السعر|اعتراض|ملاحظة/u.test(text) || normalized.includes("ط§طھظپظ‡ظ…") || normalized.includes("ط£طھظپظ‡ظ…") || normalized.includes("ط§ظ„ط³ط¹ط±") || normalized.includes("ط§ط¹طھط±ط§ط¶") || containsValue(text);
+  if (requirement === "start_cta") return /البدء|نبدأ|خطوة|تجربة|موعد/u.test(text) || normalized.includes("ط§ظ„ط¨ط¯ط،") || normalized.includes("ظ†ط¨ط¯ط£") || normalized.includes("ط®ط·ظˆط©") || normalized.includes("طھط¬ط±ط¨ط©") || normalized.includes("ظ…ظˆط¹ط¯");
+  if (requirement === "clarification") return /ما فهمت|توضح|أوضح|وضح/u.test(text) || normalized.includes("ظ…ط§ ظپظ‡ظ…طھ") || normalized.includes("طھظˆط¶ط­") || normalized.includes("ط£ظˆط¶ط­") || containsQuestion(text);
+  if (requirement === "custom_quote_handoff") return /مندوب|تواصل|أحول|احول/u.test(text) || normalized.includes("ظ…ظ†ط¯ظˆط¨") || normalized.includes("ط§طھظˆط§طµظ„") || normalized.includes("طھظˆط§طµظ„") || normalized.includes("ط£ط­ظˆظ„") || normalized.includes("ط§ط­ظˆظ„");
+
+  return true;
+}
+
+function violatesForbidden(forbidden: ResponseForbidden, text: string, decision: AgentDecision) {
+  if (forbidden === "qualification_question") return containsQuestion(text);
+  if (forbidden === "price") return containsBlockedOfferLanguage(text);
+  if (forbidden === "offer") return containsBlockedOfferLanguage(text);
+  if (forbidden === "demo") return /demo|ديمو|تجربة/iu.test(text) || normalize(text).includes("طھط¬ط±ط¨ط©");
+  if (forbidden === "stage_regression") return regressesConversation(decision, text);
+  if (forbidden === "internal_labels") return disallowedCustomerFacingPatterns.some((pattern) => pattern.test(text));
+  if (forbidden === "repeat_question") return Boolean(detectRepeatedQuestion(text, decision));
+  if (forbidden === "multiple_questions") return (text.match(/[طں?]/gu) ?? []).length > 1;
+  if (forbidden === "value_only") return !containsDirectAnswerTerm(text, decision) && containsValue(text);
+  if (forbidden === "value_pitch") return containsValue(text);
+  if (forbidden === "ignore_question") return false;
+  return false;
+}
+
+function containsDirectAnswerTerm(text: string, decision: AgentDecision): boolean {
+  const intents = decision.directAnswerIntents;
+  if (intents.includes("ASK_PRICE") || intents.includes("ASK_QUOTE")) return satisfiesRequirement("price", text, decision);
+  if (intents.includes("ASK_LOCATION")) return satisfiesRequirement("location", text, decision);
+  if (intents.includes("ASK_SERVICE")) return satisfiesRequirement("service", text, decision);
+  if (intents.includes("ASK_HOW_IT_WORKS")) return satisfiesRequirement("how_it_works", text, decision);
+  return false;
+}
+
+function includesContentTerm(text: string, content?: string) {
+  if (!content) return false;
+  const normalizedText = normalize(text);
+  const terms = content
+    .split(/[،,|.()]/u)
+    .map((term) => normalize(term).trim())
+    .filter((term) => term.length > 3)
+    .slice(0, 6);
+
+  return terms.some((term) => normalizedText.includes(term));
 }
 
 function chooseValidationCode(violations: string[]): ReplyValidationCode {
@@ -242,6 +346,14 @@ function regressesConversation(decision: AgentDecision, text: string) {
 }
 
 function shouldRequireValue(decision: AgentDecision) {
+  if (decision.responseContract.mustAnswer.includes("greeting")) return false;
+  if (decision.responseContract.mustAnswer.includes("identity")) return false;
+  if (
+    decision.responseContract.route === "DIRECT_ANSWER" &&
+    !decision.responseContract.mustAnswer.includes("value")
+  ) {
+    return false;
+  }
   if (decision.directAnswerIntent) return false;
   if (["Unclear Reply", "Location Question", "Hours Question", "Answer Reason Question"].includes(decision.intent)) return false;
   return Boolean(decision.customerContext.facts.length || decision.route === "QUALIFY" || decision.nextAction === "EXPLAIN_VALUE");
@@ -249,6 +361,13 @@ function shouldRequireValue(decision: AgentDecision) {
 
 function containsValue(text: string) {
   const normalized = normalize(text);
+  if (
+    /تنظيم|ينظم|يرتب|ترتيب|تسريع|يسرع|تقليل|يقلل|تخفيف|يوفر|ضغط|تأخير|متابعة|فرص|صفقات|وقت|الأسئلة المتكررة|العملاء الجاهزين|محادثات|ردود/u.test(
+      text,
+    )
+  ) {
+    return true;
+  }
   return [
     "تنظيم",
     "ينظم",

@@ -7,7 +7,7 @@
     "build": "prisma generate && next build",
     "start": "next start",
     "lint": "eslint",
-    "test": "tsx --test tests/response-policy.test.ts tests/intent-override.test.ts tests/humanize-response.test.ts tests/discovery-cta.test.ts tests/offer-guard.test.ts tests/value-stage.test.ts tests/production-flow.test.ts",
+    "test": "tsx --test tests/response-policy.test.ts tests/intent-override.test.ts tests/humanize-response.test.ts tests/discovery-cta.test.ts tests/offer-guard.test.ts tests/value-stage.test.ts tests/production-flow.test.ts tests/contract-e2e.test.ts",
     "db:generate": "prisma generate",
     "db:migrate": "prisma migrate dev",
     "db:deploy": "prisma migrate deploy",

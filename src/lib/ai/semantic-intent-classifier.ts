@@ -14,6 +14,7 @@ type ClassifySemanticIntentInput = {
 };
 
 const intentNameSchema = z.enum([
+  "GREETING",
   "ASK_PRICE",
   "ASK_QUOTE",
   "ASK_LOCATION",
@@ -36,7 +37,7 @@ const classifierResponseSchema = z.object({
 });
 
 export async function classifySemanticIntent(input: ClassifySemanticIntentInput): Promise<SemanticIntentClassification> {
-  const provider = process.env.INTENT_CLASSIFIER_PROVIDER ?? process.env.AI_PROVIDER ?? "mock";
+  const provider = resolveIntentProvider();
 
   try {
     if (provider === "gemini" && process.env.GEMINI_API_KEY?.trim()) {
@@ -124,11 +125,13 @@ function buildClassifierPrompt(input: ClassifySemanticIntentInput) {
     '{"intents":[{"intent":"ASK_PRICE","confidence":0.0,"reason":"short reason"}]}',
     "",
     "Allowed intents:",
-    "ASK_PRICE, ASK_QUOTE, ASK_LOCATION, ASK_SERVICE, ASK_HOW_IT_WORKS, OBJECTION, START, GENERAL, UNKNOWN",
+    "GREETING, ASK_PRICE, ASK_QUOTE, ASK_LOCATION, ASK_SERVICE, ASK_HOW_IT_WORKS, OBJECTION, START, GENERAL, UNKNOWN",
     "",
     "Rules:",
     "- Classify by meaning, not exact words.",
     "- Support multi-intent when the message asks multiple things.",
+    "- GREETING means the customer is only greeting or opening the conversation casually.",
+    "- If a message has greeting + a real question, include GREETING and the real question intent.",
     "- ASK_QUOTE means a general package/quote/subscription request.",
     "- Custom/private project requests are still ASK_QUOTE; downstream logic can hand off if needed.",
     "- START means customer wants to begin, subscribe, book, or move forward.",
@@ -176,6 +179,10 @@ function classifyWithLocalFallback(message: string): Pick<SemanticIntentClassifi
   const normalized = normalize(message);
   const intents: Array<{ intent: SemanticIntentName; confidence: number; reason: string }> = [];
 
+  if (isGreetingLike(normalized)) {
+    intents.push({ intent: "GREETING", confidence: 0.8, reason: "local greeting cue" });
+  }
+
   if (/(السعر|الاسعار|الأسعار|تكلف|بكم|كم\s+(?:سعر|السعر|التكلفة|تكلفة))/u.test(normalized)) {
     intents.push({ intent: "ASK_PRICE", confidence: 0.82, reason: "local price cue" });
   }
@@ -199,6 +206,22 @@ function classifyWithLocalFallback(message: string): Pick<SemanticIntentClassifi
   }
 
   return { intents: intents.length ? normalizeIntentItems(intents) : [{ intent: "GENERAL", confidence: 0.55, reason: "local fallback" }] };
+}
+
+function resolveIntentProvider() {
+  if (process.env.INTENT_CLASSIFIER_PROVIDER?.trim()) return process.env.INTENT_CLASSIFIER_PROVIDER;
+  if (process.env.GEMINI_API_KEY?.trim()) return "gemini";
+  if (process.env.GROQ_API_KEY?.trim()) return "groq";
+  return process.env.AI_PROVIDER ?? "mock";
+}
+
+function isGreetingLike(normalized: string) {
+  const compact = normalized.replace(/\s+/g, "");
+  if (/^(hi|hello|hey)$/iu.test(normalized)) return true;
+  if (/^(السلامعليكم|سلامعليكم|سلاموعليكم|السلاموعليكم|وعليكمالسلام|مرحبا|اهلا|ياهلا|هلا)$/u.test(compact)) {
+    return true;
+  }
+  return /^(السلام|سلام|مرحبا|اهلا|هلا)\b/u.test(normalized) && normalized.split(/\s+/).length <= 4;
 }
 
 function normalize(value: string) {
