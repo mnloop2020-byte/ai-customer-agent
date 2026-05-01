@@ -65,7 +65,8 @@ const painPointRules = [
   { label: "ضغط على الفريق", keywords: ["ضغط", "مرهق", "زحمة", "عبء", "pressure", "overload"] },
   { label: "تأخير في الرد", keywords: ["تأخير", "نتأخر", "بطء", "متأخر", "delay", "slow"] },
   { label: "ضياع فرص", keywords: ["ضياع", "نفقد", "فرص", "عملاء يروحون", "lost leads", "missed"] },
-  { label: "ردود كثيرة", keywords: ["رسائل كثيرة", "محادثات كثيرة", "طلبات كثيرة", "many messages"] },
+  { label: "ردود كثيرة", keywords: ["رسائل كثيرة", "محادثات كثيرة", "طلبات كثيرة", "many messages", "طلبات كبيرة", "طلبات كثير", "اوردرات", "أوردرات"] },
+  { label: "حجم طلبات مرتفع", keywords: ["متجر", "متجر إلكتروني", "متجر الكتروني", "طلبات يومية", "أستقبل طلبات", "استقبل طلبات", "طلبات كثيرة", "اوردرات كثيرة", "مبيعات كثيرة"] },
 ];
 
 export function buildCustomerContext(input: BuildCustomerContextInput): CustomerContext {

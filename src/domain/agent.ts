@@ -912,6 +912,24 @@ function shouldAskOperationalDiscovery(lead: ReturnType<typeof mergeLeadSnapshot
     "support",
     "messages",
     "chats",
+    // متاجر وطلبات
+    "متجر",
+    "متجره",
+    "طلبات",
+    "طلب",
+    "اوردر",
+    "اوردرات",
+    "orders",
+    "order",
+    "مبيعات",
+    "sales",
+    "تجارة",
+    "تجاره",
+    "store",
+    "shop",
+    "منتج",
+    "منتجات",
+    "products",
   ]);
 
   return knownOperationalFact || Boolean(customerContext.painPoints.length) || mentionsSupportLoad;
@@ -1933,6 +1951,26 @@ function extractNeedSummary(rawMessage: string, serviceName?: string) {
 
   const clean = rawMessage.trim();
   if (clean.length < 8) return undefined;
+
+  // إذا ذكر متجر أو طلبات، اربطها بخدمة العملاء حتى يُفعَّل operational discovery
+  const normalized = normalize(clean);
+  if (
+    containsPattern(normalized, [
+      "متجر",
+      "متجره",
+      "طلبات",
+      "اوردر",
+      "اوردرات",
+      "مبيعات",
+      "تجارة",
+      "تجاره",
+      "store",
+      "shop",
+      "orders",
+    ])
+  ) {
+    return `خدمة عملاء - ${clean.slice(0, 160)}`;
+  }
 
   return clean.slice(0, 220);
 }
