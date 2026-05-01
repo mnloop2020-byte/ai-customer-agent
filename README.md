@@ -1,36 +1,56 @@
-This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
+# AI Customer Agent
+
+Professional SaaS platform for an AI customer and sales agent.
+
+The first version includes a dashboard shell, SaaS-ready Prisma schema, an AI workflow module, and a test API for analyzing incoming customer messages.
 
 ## Getting Started
 
-First, run the development server:
-
 ```bash
 npm run dev
-# or
-yarn dev
-# or
-pnpm dev
-# or
-bun dev
 ```
 
-Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
+Open [http://localhost:3000](http://localhost:3000) with your browser.
 
-You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
+## Useful Commands
 
-This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
+```bash
+npm run lint
+npm run build
+npm run db:generate
+npm run db:migrate
+npm run db:push
+npm run db:studio
+npm run db:up
+npm run db:down
+```
 
-## Learn More
+## Key Files
 
-To learn more about Next.js, take a look at the following resources:
+- `src/app/page.tsx` - operational dashboard.
+- `src/domain/agent.ts` - AI decision workflow.
+- `src/domain/company.ts` - company knowledge profile and validation.
+- `src/domain/chat.ts` - web chat request and reply contracts.
+- `src/lib/company-profile-store.ts` - temporary local storage adapter for company settings.
+- `src/lib/ai/provider.ts` - server-side Gemini/Groq provider adapter.
+- `src/app/api/agent/analyze/route.ts` - message analysis API.
+- `src/app/api/chat/message/route.ts` - customer-facing chat reply API.
+- `src/lib/db.ts` - Prisma client helper for PostgreSQL.
+- `prisma/schema.prisma` - SaaS database model.
+- `docker-compose.yml` - local PostgreSQL service.
+- `docs/` - product, architecture, and roadmap notes.
 
-- [Next.js Documentation](https://nextjs.org/docs) - learn about Next.js features and API.
-- [Learn Next.js](https://nextjs.org/learn) - an interactive Next.js tutorial.
+## MVP Direction
 
-You can check out [the Next.js GitHub repository](https://github.com/vercel/next.js) - your feedback and contributions are welcome!
+This codebase is designed to grow into:
 
-## Deploy on Vercel
+- Web chat and WhatsApp intake.
+- CRM for leads and conversations.
+- AI qualification, scoring, routing, and response generation.
+- Persisted Web Chat conversations.
+- Real Leads and Inbox backed by PostgreSQL.
+- Automated follow-ups.
+- Human handoff.
+- Booking, payment, and reporting integrations.
 
-The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.
-
-Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/building-your-application/deploying) for more details.
+See `docs/roadmap.md` for the staged build plan.

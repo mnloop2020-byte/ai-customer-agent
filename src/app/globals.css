@@ -1,26 +1,259 @@
+@import url("https://fonts.googleapis.com/css2?family=Tajawal:wght@400;500;600;700&family=Inter:wght@400;500;600;700&display=swap");
 @import "tailwindcss";
 
 :root {
-  --background: #ffffff;
-  --foreground: #171717;
+  /* ── Layout ── */
+  --sidebar-w: 232px;
+  --r:    8px;
+  --r-lg: 10px;
+
+  /* ── Palette ── */
+  --bg:           #f0f2f5;
+  --bg-1:         #ffffff;
+  --bg-2:         #ffffff;
+  --bg-3:         #f7f8fa;
+  --surface:      #ffffff;
+  --surface-hover:#f7f8fa;
+
+  --border:       #e4e7ed;
+  --border-strong:#c9cfd8;
+
+  --text-1: #0d1117;
+  --text-2: #3d4451;
+  --text-3: #7c8494;
+
+  /* ── Accent — blue ── */
+  --accent:      #2563eb;
+  --accent-mid:  #1d4ed8;
+  --accent-dim:  #eff6ff;
+  --accent-glow: rgba(37,99,235,0.14);
+
+  /* ── Accent 2 — indigo ── */
+  --accent-2:     #6366f1;
+  --accent-2-dim: #eef2ff;
+
+  /* ── Status ── */
+  --hot:     #ef4444;
+  --warm:    #f59e0b;
+  --cold:    #64748b;
+  --success: #10b981;
+  --danger:  #ef4444;
+
+  /* ── Fonts ── */
+  --font-main: "Tajawal", "Inter", system-ui, sans-serif;
+  --font-mono: "Inter", monospace;
 }
 
 @theme inline {
-  --color-background: var(--background);
-  --color-foreground: var(--foreground);
-  --font-sans: var(--font-geist-sans);
-  --font-mono: var(--font-geist-mono);
+  --color-background: var(--bg);
+  --color-foreground: var(--text-1);
+  --font-sans: var(--font-main);
+  --font-mono: var(--font-mono);
 }
 
-@media (prefers-color-scheme: dark) {
-  :root {
-    --background: #0a0a0a;
-    --foreground: #ededed;
-  }
+*, *::before, *::after { box-sizing: border-box; }
+
+html {
+  background: var(--bg);
+  overflow-x: hidden;
+  color-scheme: light;
 }
 
 body {
-  background: var(--background);
-  color: var(--foreground);
-  font-family: Arial, Helvetica, sans-serif;
+  min-height: 100vh;
+  background: var(--bg);
+  color: var(--text-2);
+  font-family: var(--font-main);
+  overflow-x: hidden;
+  font-size: 14px;
+  line-height: 1.6;
 }
+
+::selection { background: var(--accent-dim); color: var(--accent); }
+input, textarea, select, button { font: inherit; }
+input::placeholder, textarea::placeholder { color: var(--text-3); }
+
+/* thin scrollbar */
+::-webkit-scrollbar       { width: 5px; height: 5px; }
+::-webkit-scrollbar-track { background: transparent; }
+::-webkit-scrollbar-thumb { background: var(--border-strong); border-radius: 9px; }
+::-webkit-scrollbar-thumb:hover { background: var(--text-3); }
+
+@layer base {
+  h1, h2, h3, h4 { color: var(--text-1); letter-spacing: -0.01em; font-weight: 600; }
+  a { color: inherit; text-decoration: none; }
+  table { color: var(--text-2); }
+}
+
+/* ════════════════════════════════
+   Component classes
+════════════════════════════════ */
+@layer components {
+
+  /* ── Cards ── */
+  .app-card {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: var(--r-lg);
+    box-shadow: 0 1px 2px rgba(0,0,0,0.04), 0 2px 8px rgba(0,0,0,0.03);
+    position: relative;
+    overflow: hidden;
+    transition: border-color 160ms, box-shadow 160ms;
+  }
+  .app-card:hover {
+    border-color: var(--border-strong);
+    box-shadow: 0 2px 4px rgba(0,0,0,0.06), 0 4px 16px rgba(0,0,0,0.04);
+  }
+
+  .app-surface {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: var(--r-lg);
+    box-shadow: 0 1px 2px rgba(0,0,0,0.04);
+  }
+
+  /* ── Buttons ── */
+  .btn-primary {
+    background: var(--accent);
+    color: #fff;
+    border: 1px solid var(--accent);
+    font-weight: 600;
+    letter-spacing: -0.01em;
+    transition: background 140ms, box-shadow 140ms, transform 100ms;
+    cursor: pointer;
+  }
+  .btn-primary:hover:not(:disabled) {
+    background: var(--accent-mid);
+    border-color: var(--accent-mid);
+    box-shadow: 0 4px 14px var(--accent-glow);
+    transform: translateY(-1px);
+  }
+  .btn-primary:active:not(:disabled) {
+    transform: translateY(0);
+    box-shadow: none;
+  }
+
+  .btn-secondary {
+    background: var(--surface);
+    color: var(--text-2);
+    border: 1px solid var(--border-strong);
+    font-weight: 500;
+    transition: background 140ms, border-color 140ms, color 140ms, transform 100ms;
+    cursor: pointer;
+  }
+  .btn-secondary:hover {
+    background: var(--bg-3);
+    border-color: var(--text-3);
+    color: var(--text-1);
+    transform: translateY(-1px);
+  }
+  .btn-secondary:active { transform: translateY(0); }
+
+  .btn-danger {
+    background: #fef2f2;
+    color: var(--danger);
+    border: 1px solid #fecaca;
+    font-weight: 600;
+    transition: background 140ms, transform 100ms;
+    cursor: pointer;
+  }
+  .btn-danger:hover {
+    background: #fee2e2;
+    border-color: #fca5a5;
+    transform: translateY(-1px);
+  }
+
+  .btn-ghost {
+    background: transparent;
+    color: var(--text-3);
+    border: 1px solid transparent;
+    transition: background 140ms, color 140ms;
+    cursor: pointer;
+  }
+  .btn-ghost:hover { background: var(--bg-3); color: var(--text-1); }
+
+  /* ── Fields ── */
+  .field-shell {
+    background: var(--surface);
+    border: 1.5px solid var(--border);
+    color: var(--text-1);
+    transition: border-color 140ms, box-shadow 140ms;
+    border-radius: var(--r);
+  }
+  .field-shell:focus-within,
+  .field-shell:focus {
+    border-color: var(--accent);
+    box-shadow: 0 0 0 3px var(--accent-glow);
+    outline: none;
+  }
+  .field-shell textarea,
+  .field-shell input {
+    background: transparent;
+    color: var(--text-1);
+    outline: none;
+  }
+
+  /* ── Divider ── */
+  .soft-divider { border-color: var(--border); }
+
+  .dashboard-activity-row:hover {
+    background: var(--bg-3);
+  }
+
+  .start-step-link:hover {
+    border-color: var(--accent) !important;
+    box-shadow: 0 2px 8px var(--accent-glow);
+  }
+
+  .developer-link:hover {
+    background: var(--accent-dim) !important;
+  }
+
+  /* ── Animations ── */
+  .animate-fade-up { animation: fadeUp 0.3s cubic-bezier(0.16, 1, 0.3, 1) both; }
+  .anim-d1 { animation-delay: 0.03s; }
+  .anim-d2 { animation-delay: 0.06s; }
+  .anim-d3 { animation-delay: 0.09s; }
+  .anim-d4 { animation-delay: 0.12s; }
+  .anim-d5 { animation-delay: 0.15s; }
+
+  /* ── Table base ── */
+  .data-table { width: 100%; border-collapse: collapse; font-size: 13.5px; }
+  .data-table th {
+    padding: 10px 14px;
+    text-align: right;
+    font-size: 11px;
+    font-weight: 600;
+    color: var(--text-3);
+    letter-spacing: 0.04em;
+    text-transform: uppercase;
+    background: var(--bg-3);
+    border-bottom: 1px solid var(--border);
+    white-space: nowrap;
+  }
+  .data-table td {
+    padding: 11px 14px;
+    border-bottom: 1px solid var(--border);
+    vertical-align: middle;
+    color: var(--text-2);
+  }
+  .data-table tr:last-child td { border-bottom: none; }
+  .data-table tbody tr { transition: background 120ms; }
+  .data-table tbody tr:hover td { background: var(--bg-3); }
+}
+
+/* ── Keyframes ── */
+@keyframes fadeUp {
+  from { opacity: 0; transform: translateY(6px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+
+@keyframes pulse-ring {
+  0%, 100% { opacity: 1; transform: scale(1); }
+  50%       { opacity: 0.4; transform: scale(0.78); }
+}
+
+@keyframes spin {
+  to { transform: rotate(360deg); }
+}
+.animate-spin { animation: spin 0.8s linear infinite; }
