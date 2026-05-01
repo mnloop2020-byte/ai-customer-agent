@@ -23,6 +23,8 @@ export default async function KnowledgePage() {
           title: document.title,
           status: document.status,
           sourceName: document.sourceName,
+          content: document.content,
+          sourceType: document.sourceType === "PDF" ? "PDF" : "TEXT",
           chunkCount: document._count.chunks,
           updatedAt: formatDate(document.updatedAt),
         }))}

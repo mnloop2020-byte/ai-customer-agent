@@ -66,6 +66,74 @@ export async function createKnowledgeDocument({
   });
 }
 
+export async function updateKnowledgeDocument({
+  companyId,
+  documentId,
+  title,
+  content,
+  sourceName,
+  status,
+}: {
+  companyId: string;
+  documentId: string;
+  title?: string;
+  content?: string;
+  sourceName?: string | null;
+  status?: "CURRENT" | "ARCHIVED" | "DRAFT";
+}) {
+  return prisma.$transaction(async (tx) => {
+    const current = await tx.knowledgeDocument.findFirst({
+      where: { id: documentId, companyId },
+      select: {
+        id: true,
+        title: true,
+        content: true,
+        sourceName: true,
+        status: true,
+      },
+    });
+
+    if (!current) return null;
+
+    const nextTitle = title ?? current.title;
+    const nextContent = content ?? current.content;
+    const nextSourceName = sourceName === undefined ? current.sourceName : sourceName || null;
+    const shouldRebuildChunks =
+      title !== undefined ||
+      content !== undefined ||
+      sourceName !== undefined;
+    const chunks = shouldRebuildChunks ? chunkKnowledgeText(nextContent) : [];
+
+    const document = await tx.knowledgeDocument.update({
+      where: { id: documentId },
+      data: {
+        title: nextTitle,
+        content: nextContent,
+        sourceName: nextSourceName,
+        status: status ?? current.status,
+      },
+    });
+
+    if (shouldRebuildChunks) {
+      await tx.knowledgeChunk.deleteMany({ where: { documentId } });
+
+      if (chunks.length) {
+        await tx.knowledgeChunk.createMany({
+          data: chunks.map((chunk, index) => ({
+            companyId,
+            documentId,
+            content: chunk,
+            embedding: buildEmbedding(`${nextTitle} ${nextSourceName ?? ""} ${chunk}`),
+            position: index,
+          })),
+        });
+      }
+    }
+
+    return { ...document, chunkCount: shouldRebuildChunks ? chunks.length : undefined };
+  });
+}
+
 export async function searchKnowledge({
   companyId,
   query,

@@ -218,23 +218,92 @@ function satisfiesRequirement(
   decision: AgentDecision,
   content?: ResolvedResponseContent,
 ): boolean {
-  const normalized = normalize(text);
+  if (requirement === "greeting") {
+    return /السلام|اهلا|أهلا|مرحبا|وعليكم|هلا|يهلا/u.test(text);
+  }
 
-  if (requirement === "greeting") return /السلام|اهلا|أهلا|مرحبا|وعليكم/u.test(text) || normalized.includes("ط§ظ„ط³ظ„ط§ظ…") || normalized.includes("ط§ظ‡ظ„ط§") || normalized.includes("ظ…ط±ط­ط¨ط§");
-  if (requirement === "identity") return normalized.includes("ظ…ط³ط§ط¹ط¯") || normalized.includes("mntechnique") || text.includes("مساعد");
-  if (requirement === "price") return /\$\s*\d|\d+\s*\$/u.test(text) || /السعر|الأسعار|اسعار|تكلفة|باقة/u.test(text) || normalized.includes("ط§ظ„ط³ط¹ط±") || normalized.includes("ط§ظ„ط§ط³ط¹ط§ط±") || text.includes("100") || text.includes("300") || includesContentTerm(text, content?.pricing);
-  if (requirement === "quote") return satisfiesRequirement("price", text, decision, content) || normalized.includes("ط¨ط§ظ‚ط©") || normalized.includes("ط®ظٹط§ط±");
-  if (requirement === "location") return includesContentTerm(text, content?.location) || /موقع|اسطنبول|تركيا|نقدم الخدمة من/u.test(text) || normalized.includes("ظ…ظˆظ‚ط¹") || normalized.includes("ط§ط³ط·ظ†ط¨ظˆظ„") || normalized.includes("طھط±ظƒظٹط§");
-  if (requirement === "service") return containsValue(text) || includesContentTerm(text, content?.service) || /خدمة|عملاء|محادثات|ردود/u.test(text) || normalized.includes("ط®ط¯ظ…ط©") || normalized.includes("ط§ظ„ط¹ظ…ظ„ط§ط،");
-  if (requirement === "how_it_works") return containsValue(text) || /يعمل|يشتغل|ينظم|يرد|يحول/u.test(text) || normalized.includes("ظٹط¹ظ…ظ„") || normalized.includes("ظٹط´طھط؛ظ„") || normalized.includes("ظٹظ†ط¸ظ…") || normalized.includes("ظٹط±ط¯");
-  if (requirement === "whatsapp") return /whats\s*app|whatsapp|واتساب|واتس/iu.test(text) || normalized.includes("ظˆط§طھط³");
-  if (requirement === "qualification_question") return containsQuestion(text);
-  if (requirement === "value") return containsValue(text);
-  if (requirement === "offer") return normalized.includes("ط¨ط§ظ‚ط©") || normalized.includes("ط§ظ„ط®ظٹط§ط±") || normalized.includes("ط§ظ„ط£ظ†ط³ط¨") || Boolean(decision.recommendedOffer && text.includes(decision.recommendedOffer.offerName));
-  if (requirement === "objection") return /أتفهم|السعر|اعتراض|ملاحظة/u.test(text) || normalized.includes("ط§طھظپظ‡ظ…") || normalized.includes("ط£طھظپظ‡ظ…") || normalized.includes("ط§ظ„ط³ط¹ط±") || normalized.includes("ط§ط¹طھط±ط§ط¶") || containsValue(text);
-  if (requirement === "start_cta") return /البدء|نبدأ|خطوة|تجربة|موعد/u.test(text) || normalized.includes("ط§ظ„ط¨ط¯ط،") || normalized.includes("ظ†ط¨ط¯ط£") || normalized.includes("ط®ط·ظˆط©") || normalized.includes("طھط¬ط±ط¨ط©") || normalized.includes("ظ…ظˆط¹ط¯");
-  if (requirement === "clarification") return /ما فهمت|توضح|أوضح|وضح/u.test(text) || normalized.includes("ظ…ط§ ظپظ‡ظ…طھ") || normalized.includes("طھظˆط¶ط­") || normalized.includes("ط£ظˆط¶ط­") || containsQuestion(text);
-  if (requirement === "custom_quote_handoff") return /مندوب|تواصل|أحول|احول/u.test(text) || normalized.includes("ظ…ظ†ط¯ظˆط¨") || normalized.includes("ط§طھظˆط§طµظ„") || normalized.includes("طھظˆط§طµظ„") || normalized.includes("ط£ط­ظˆظ„") || normalized.includes("ط§ط­ظˆظ„");
+  if (requirement === "identity") {
+    return /مساعد|مساعده|MNtechnique|منتكنيك/iu.test(text);
+  }
+
+  if (requirement === "price") {
+    return (
+      /\$\s*\d|\d+\s*\$/u.test(text) ||
+      /السعر|الأسعار|الاسعار|اسعار|تكلفة|تكلفه|باقة|باقه|\d+\s*دولار|\d+\s*ريال/u.test(text) ||
+      /100|200|300|400|500/u.test(text) ||
+      includesContentTerm(text, content?.pricing)
+    );
+  }
+
+  if (requirement === "quote") {
+    return (
+      satisfiesRequirement("price", text, decision, content) ||
+      /باقة|باقه|خيار|الخيارات|عرض سعر|اشتراك/u.test(text)
+    );
+  }
+
+  if (requirement === "location") {
+    return (
+      includesContentTerm(text, content?.location) ||
+      /موقع|موقعنا|اسطنبول|إسطنبول|تركيا|السعودية|نقدم الخدمة/u.test(text)
+    );
+  }
+
+  if (requirement === "service") {
+    return (
+      containsValue(text) ||
+      includesContentTerm(text, content?.service) ||
+      /خدمة|خدمه|عملاء|محادثات|ردود|نظام|نقدم/u.test(text)
+    );
+  }
+
+  if (requirement === "how_it_works") {
+    return (
+      containsValue(text) ||
+      /يعمل|يشتغل|ينظم|يرتب|يرد|يحول|طريقة|آلية/u.test(text)
+    );
+  }
+
+  if (requirement === "whatsapp") {
+    return /whats\s*app|whatsapp|واتساب|واتس/iu.test(text);
+  }
+
+  if (requirement === "qualification_question") {
+    return containsQuestion(text);
+  }
+
+  if (requirement === "value") {
+    return containsValue(text);
+  }
+
+  if (requirement === "offer") {
+    return (
+      /باقة|باقه|الخيار|الأنسب|خطة|اشتراك/u.test(text) ||
+      Boolean(decision.recommendedOffer && text.includes(decision.recommendedOffer.offerName))
+    );
+  }
+
+  if (requirement === "objection") {
+    return (
+      /أتفهم|اتفهم|السعر|اعتراض|ملاحظة|ملاحظه|أفهم|افهم/u.test(text) ||
+      containsValue(text)
+    );
+  }
+
+  if (requirement === "start_cta") {
+    return /البدء|نبدأ|خطوة|خطوه|تجربة|تجربه|موعد|نبدا|ابدأ|ابدا/u.test(text);
+  }
+
+  if (requirement === "clarification") {
+    return (
+      /ما فهمت|ما فهمت|توضح|أوضح|اوضح|وضح|غير واضح/u.test(text) ||
+      containsQuestion(text)
+    );
+  }
+
+  if (requirement === "custom_quote_handoff") {
+    return /مندوب|تواصل|أحول|احول|سأحول|سوف احول|فريق المبيعات/u.test(text);
+  }
 
   return true;
 }
@@ -243,11 +312,11 @@ function violatesForbidden(forbidden: ResponseForbidden, text: string, decision:
   if (forbidden === "qualification_question") return containsQuestion(text);
   if (forbidden === "price") return containsBlockedOfferLanguage(text);
   if (forbidden === "offer") return containsBlockedOfferLanguage(text);
-  if (forbidden === "demo") return /demo|ديمو|تجربة/iu.test(text) || normalize(text).includes("طھط¬ط±ط¨ط©");
+  if (forbidden === "demo") return /demo|ديمو|تجربة|تجربه/iu.test(text);
   if (forbidden === "stage_regression") return regressesConversation(decision, text);
   if (forbidden === "internal_labels") return disallowedCustomerFacingPatterns.some((pattern) => pattern.test(text));
   if (forbidden === "repeat_question") return Boolean(detectRepeatedQuestion(text, decision));
-  if (forbidden === "multiple_questions") return (text.match(/[طں?]/gu) ?? []).length > 1;
+  if (forbidden === "multiple_questions") return (text.match(/[؟?]/gu) ?? []).length > 1;
   if (forbidden === "value_only") return !containsDirectAnswerTerm(text, decision) && containsValue(text);
   if (forbidden === "value_pitch") return containsValue(text);
   if (forbidden === "ignore_question") return false;
@@ -294,9 +363,21 @@ function detectRepeatedQuestion(text: string, decision: AgentDecision) {
 function detectQuestionField(text: string) {
   const questionText = getQuestionText(text);
   const normalized = normalize(questionText);
-  if (containsQuestion(text) && (normalized.includes("كم رساله") || normalized.includes("رساله تستقبلون") || normalized.includes("رسالة تستقبلون") || normalized.includes("يوميا") || normalized.includes("يوميًا"))) {
+
+  if (
+    containsQuestion(text) &&
+    (
+      normalized.includes("كم رساله") ||
+      normalized.includes("كم رسالة") ||
+      normalized.includes("رساله تستقبلون") ||
+      normalized.includes("رسالة تستقبلون") ||
+      normalized.includes("يوميا") ||
+      normalized.includes("يوميا")
+    )
+  ) {
     return "messages_per_day";
   }
+
   if (
     containsQuestion(text) &&
     (
@@ -313,9 +394,19 @@ function detectQuestionField(text: string) {
   ) {
     return "team_size";
   }
-  if (containsQuestion(text) && (normalized.includes("هل تواجهون") || normalized.includes("ضغط") || normalized.includes("تاخير") || normalized.includes("تأخير"))) {
+
+  if (
+    containsQuestion(text) &&
+    (
+      normalized.includes("هل تواجهون") ||
+      normalized.includes("ضغط") ||
+      normalized.includes("تاخير") ||
+      normalized.includes("تاخير")
+    )
+  ) {
     return "problem_confirmation";
   }
+
   return undefined;
 }
 
@@ -326,7 +417,19 @@ function getQuestionText(text: string) {
 
 function regressesConversation(decision: AgentDecision, text: string) {
   const normalized = normalize(text);
-  if (decision.messagesPerDay && (normalized.includes("كم رساله") || normalized.includes("رساله تستقبلون") || normalized.includes("رسالة تستقبلون"))) return true;
+
+  if (
+    decision.messagesPerDay &&
+    (
+      normalized.includes("كم رساله") ||
+      normalized.includes("كم رسالة") ||
+      normalized.includes("رساله تستقبلون") ||
+      normalized.includes("رسالة تستقبلون")
+    )
+  ) {
+    return true;
+  }
+
   if (
     decision.teamSize &&
     (
@@ -342,6 +445,7 @@ function regressesConversation(decision: AgentDecision, text: string) {
   ) {
     return true;
   }
+
   return false;
 }
 
@@ -360,39 +464,7 @@ function shouldRequireValue(decision: AgentDecision) {
 }
 
 function containsValue(text: string) {
-  const normalized = normalize(text);
-  if (
-    /تنظيم|ينظم|يرتب|ترتيب|تسريع|يسرع|تقليل|يقلل|تخفيف|يوفر|ضغط|تأخير|متابعة|فرص|صفقات|وقت|الأسئلة المتكررة|العملاء الجاهزين|محادثات|ردود/u.test(
-      text,
-    )
-  ) {
-    return true;
-  }
-  return [
-    "تنظيم",
-    "ينظم",
-    "يرتب",
-    "تسريع",
-    "يسرع",
-    "يسرّع",
-    "تقليل",
-    "تخفيف",
-    "يوفر",
-    "ضغط",
-    "تاخير",
-    "تأخير",
-    "متابعه",
-    "متابعة",
-    "فرص",
-    "صفقات",
-    "وقت",
-    "وضوح",
-    "موقعنا",
-    "ساعات",
-    "الأسئلة المتكررة",
-    "الاسئلة المتكررة",
-    "العملاء الجاهزين",
-  ].some((term) => normalized.includes(normalize(term)));
+  return /تنظيم|ينظم|يرتب|ترتيب|تسريع|يسرع|يسرّع|تقليل|يقلل|تخفيف|يوفر|ضغط|تأخير|تاخير|متابعة|متابعه|فرص|صفقات|وقت|الأسئلة المتكررة|الاسئله المتكررة|العملاء الجاهزين|محادثات|ردود|وضوح|موقعنا|ساعات/u.test(text);
 }
 
 function hasCustomerFacts(strategy: PersonalizationStrategy) {

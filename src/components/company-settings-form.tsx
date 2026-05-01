@@ -47,11 +47,6 @@ export function CompanySettingsForm() {
   }
 
   function removeService(index: number) {
-    if (profile.services.length === 1) {
-      setError("يجب أن تبقى خدمة واحدة على الأقل.");
-      return;
-    }
-
     update(
       "services",
       profile.services.filter((_, serviceIndex) => serviceIndex !== index),
@@ -145,7 +140,7 @@ export function CompanySettingsForm() {
           </button>
         </div>
         <div className="divide-y divide-slate-100">
-          {profile.services.map((service, index) => (
+          {profile.services.length ? profile.services.map((service, index) => (
             <div key={index} className="grid gap-3 p-4 lg:grid-cols-[1fr_220px_1.4fr_44px]">
               <Field label="اسم الخدمة" value={service.name} onChange={(value) => updateService(index, "name", value)} />
               <Field label="السعر" value={service.price} onChange={(value) => updateService(index, "price", value)} />
@@ -162,7 +157,11 @@ export function CompanySettingsForm() {
                 <Trash2 size={16} aria-hidden="true" />
               </button>
             </div>
-          ))}
+          )) : (
+            <div className="p-5 text-sm text-slate-500">
+              لا توجد خدمات مضافة بعد. يمكن للمساعد الاعتماد على مصادر المعرفة، أو أضف خدمة وسعرها من الزر أعلاه.
+            </div>
+          )}
         </div>
       </section>
 

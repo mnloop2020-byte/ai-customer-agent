@@ -80,3 +80,70 @@ test("empty or weak replies request regeneration instead of immediate safe fallb
   assert.equal(validation.code, "REGENERATE");
   assert.match(validation.violations.join(" "), /empty_or_too_short/u);
 });
+
+test("response policy accepts clean Arabic direct answers for contract requirements", () => {
+  const priceDecision = analyzeIncomingMessage({
+    body: "كم السعر؟",
+    channel: "WEB_CHAT",
+    companyProfile: defaultCompanyProfile,
+  });
+
+  const priceValidation = validateFinalReply({
+    text: "الأسعار الحالية: الباقة الأساسية 100$ والباقة الاحترافية 300$.",
+    decision: priceDecision,
+  });
+
+  assert.equal(priceValidation.valid, true, priceValidation.violations.join(", "));
+
+  const locationDecision = analyzeIncomingMessage({
+    body: "وين تقدمون؟",
+    channel: "WEB_CHAT",
+    companyProfile: defaultCompanyProfile,
+  });
+
+  const locationValidation = validateFinalReply({
+    text: "نقدم الخدمة من اسطنبول، تركيا، ويمكننا خدمة العملاء عن بعد.",
+    decision: locationDecision,
+  });
+
+  assert.equal(locationValidation.valid, true, locationValidation.violations.join(", "));
+
+  const howDecision = analyzeIncomingMessage({
+    body: "كيف يشتغل النظام؟",
+    channel: "WEB_CHAT",
+    companyProfile: defaultCompanyProfile,
+  });
+
+  const howValidation = validateFinalReply({
+    text: "ينظم النظام المحادثات، يستخدم مصادر معرفة الشركة للرد على الأسئلة المتكررة، ويحوّل الحالات المهمة إلى متابعة واضحة.",
+    decision: howDecision,
+  });
+
+  assert.equal(howValidation.valid, true, howValidation.violations.join(", "));
+});
+
+test("response policy detects Arabic question marks and allows useful value replies", () => {
+  const decision = analyzeIncomingMessage({
+    body: "حوالي 15 رسالة يوميًا",
+    channel: "WEB_CHAT",
+    companyProfile: defaultCompanyProfile,
+    conversationHistory: [
+      { sender: "AI", body: "تقريبًا كم رسالة تستقبلون يوميًا؟" },
+    ],
+  });
+
+  const usefulReply = validateFinalReply({
+    text: "هذا عدد مناسب للبدء. النظام يرتب الرسائل المتكررة ويوفر وقت الرد، فمن يرد على العملاء حاليًا؟",
+    decision,
+  });
+
+  assert.equal(usefulReply.valid, true, usefulReply.violations.join(", "));
+
+  const tooManyQuestions = validateFinalReply({
+    text: "هذا عدد مناسب للبدء. من يرد على العملاء حاليًا؟ وهل عندكم ضغط وقت الزحمة؟",
+    decision,
+  });
+
+  assert.equal(tooManyQuestions.valid, false);
+  assert.match(tooManyQuestions.violations.join(" "), /too_many_questions_for_contract/u);
+});

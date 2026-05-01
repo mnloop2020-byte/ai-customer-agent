@@ -65,7 +65,7 @@ export function buildContractFallbackReply(input: {
   if (needs.has("how_it_works")) return input.content.howItWorks;
   if (needs.has("service")) return `نقدم خدمة تساعدك على إدارة محادثات العملاء والردود والمتابعة. ${input.content.howItWorks}`;
   if (needs.has("custom_quote_handoff")) return input.content.handoff;
-  if (needs.has("objection")) return `${facts}أتفهم ملاحظتك. الأفضل نقيس السعر مقابل الوقت والضغط الذي يقلله النظام، وليس كرقم فقط.`;
+  if (needs.has("objection")) return `${facts}أتفهم ملاحظتك. الأفضل نقيس القيمة مقابل الوقت والضغط الذي يقلله النظام، وليس كرقم فقط.`;
   if (needs.has("value")) return `${facts}النظام يرتب المحادثات والأسئلة المتكررة، يوفر وقتك، ويقلل الضغط حتى تركز على العملاء الجاهزين.`;
   if (needs.has("qualification_question")) return qualificationFallback(input.contract.nextAction);
   if (needs.has("start_cta")) return "ممتاز، نقدر نبدأ بخطوة بسيطة: نراجع بيانات الشركة والخدمة المطلوبة ثم نجهز المساعد على نفس المعلومات.";

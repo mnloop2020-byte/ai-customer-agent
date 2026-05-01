@@ -10,8 +10,18 @@ export const createKnowledgeDocumentSchema = z.object({
 });
 
 export const updateKnowledgeDocumentSchema = z.object({
-  status: knowledgeDocumentStatusSchema,
-});
+  title: z.string().trim().min(2).max(160).optional(),
+  content: z.string().trim().min(20).max(80_000).optional(),
+  sourceName: z.string().trim().max(240).optional().nullable(),
+  status: knowledgeDocumentStatusSchema.optional(),
+}).refine(
+  (value) =>
+    value.title !== undefined ||
+    value.content !== undefined ||
+    value.sourceName !== undefined ||
+    value.status !== undefined,
+  "At least one field is required.",
+);
 
 export type KnowledgeSearchResult = {
   documentId: string;

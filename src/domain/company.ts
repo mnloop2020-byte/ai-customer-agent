@@ -1,9 +1,9 @@
 import { z } from "zod";
 
 export const serviceSchema = z.object({
-  name: z.string().min(1),
-  price: z.string().min(1),
-  description: z.string().min(1),
+  name: z.string().trim().min(1),
+  price: z.string().trim().default(""),
+  description: z.string().trim().default(""),
 });
 
 export const faqSchema = z.object({
@@ -12,14 +12,14 @@ export const faqSchema = z.object({
 });
 
 export const companyProfileSchema = z.object({
-  name: z.string().min(1),
-  industry: z.string().min(1),
-  description: z.string().min(1),
-  tone: z.string().min(1),
-  workingHours: z.string().min(1),
-  location: z.string().min(1),
-  handoffRule: z.string().min(1),
-  services: z.array(serviceSchema).min(1),
+  name: z.string().trim().min(1),
+  industry: z.string().trim().default(""),
+  description: z.string().trim().default(""),
+  tone: z.string().trim().default(""),
+  workingHours: z.string().trim().default(""),
+  location: z.string().trim().default(""),
+  handoffRule: z.string().trim().default(""),
+  services: z.array(serviceSchema).default([]),
   faqs: z.array(faqSchema).default([]),
 });
 

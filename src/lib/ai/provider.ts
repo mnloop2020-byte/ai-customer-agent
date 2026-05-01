@@ -381,11 +381,13 @@ function buildMockReplyFromContract(input: GenerateReplyInput, content: Resolved
   if (needs.has("whatsapp")) return content.whatsapp;
   if (needs.has("custom_quote_handoff")) return content.handoff;
   if (needs.has("clarification")) return "ما فهمت قصدك تمامًا. ممكن توضحها بجملة قصيرة؟";
-  if (needs.has("service") && needs.has("how_it_works")) return `${content.service}. ${content.howItWorks}`;
+  if (needs.has("service") && needs.has("how_it_works")) {
+    return "نقدم نظامًا يساعد الشركات على تنظيم رسائل العملاء وتسريع الردود باستخدام معلومات الشركة. ينظم المحادثات، يرد على الأسئلة المتكررة، ويحوّل الحالات المهمة إلى متابعة واضحة.";
+  }
   if (needs.has("how_it_works")) return `ينظم الرسائل والمحادثات، يرد على الأسئلة المتكررة من معرفة الشركة، ويحول الحالات المهمة إلى متابعة أو مندوب.`;
   if (needs.has("service")) return `نقدم خدمة تساعدك على إدارة محادثات العملاء والردود والمتابعة. ينظم الرسائل والمحادثات ويرد على الأسئلة المتكررة من معرفة الشركة.`;
   if (needs.has("objection")) {
-    return "أتفهم ملاحظتك. الأهم نقيس السعر مقابل الوقت والضغط الذي يقلله النظام، خصوصًا عند وجود رسائل متكررة ومتابعات كثيرة.";
+    return "أتفهم ملاحظتك. الأهم نقيس القيمة مقابل الوقت والضغط الذي يقلله النظام، خصوصًا عند وجود رسائل متكررة ومتابعات كثيرة.";
   }
   if (needs.has("qualification_question")) {
     if (contract.nextAction === "ASK_MESSAGES_PER_DAY") {

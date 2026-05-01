@@ -2,7 +2,6 @@ import { NextResponse } from "next/server";
 import { z } from "zod";
 import { createSession } from "@/lib/auth/session";
 import { hashPassword } from "@/lib/auth/password";
-import { ensureMntechniqueCompany } from "@/lib/mntechnique-seed";
 import { prisma } from "@/lib/db";
 import { readJsonBody } from "@/lib/http/read-json";
 import { checkRateLimit, getClientKey } from "@/lib/security/rate-limit";
@@ -47,7 +46,20 @@ export async function POST(request: Request) {
     return NextResponse.json({ error: "Invalid setup data", issues: parsed.error.flatten() }, { status: 400 });
   }
 
-  const company = await ensureMntechniqueCompany();
+  const company = await prisma.company.create({
+    data: {
+      name: "شركتك",
+      slug: await uniqueCompanySlug("company"),
+      industry: "",
+      description: "",
+      location: "",
+      workingHours: "",
+      aiPersona: "ردود عربية واضحة ومهنية ومختصرة بناءً على معلومات الشركة ومصادر المعرفة.",
+      handoffRules: [],
+      timezone: "Asia/Riyadh",
+    },
+  });
+
   const user = await prisma.user.create({
     data: {
       companyId: company.id,
@@ -67,4 +79,17 @@ export async function POST(request: Request) {
   });
 
   return NextResponse.json({ ok: true });
+}
+
+async function uniqueCompanySlug(base: string) {
+  const normalized = base.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "") || "company";
+  let slug = normalized;
+  let counter = 1;
+
+  while (await prisma.company.findUnique({ where: { slug }, select: { id: true } })) {
+    counter += 1;
+    slug = `${normalized}-${counter}`;
+  }
+
+  return slug;
 }

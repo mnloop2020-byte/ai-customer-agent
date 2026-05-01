@@ -6,10 +6,12 @@ import {
   Archive,
   CheckCircle2,
   FileText,
+  Pencil,
   Plus,
   RefreshCw,
   Trash2,
   Upload,
+  X,
 } from "lucide-react";
 
 type KnowledgeDocumentStatus = "CURRENT" | "ARCHIVED" | "DRAFT";
@@ -20,6 +22,8 @@ type KnowledgeDocumentRow = {
   title: string;
   status: KnowledgeDocumentStatus;
   sourceName: string | null;
+  content: string;
+  sourceType: KnowledgeSourceType;
   updatedAt: string;
   chunkCount: number;
 };
@@ -34,7 +38,7 @@ type UploadPreview = {
 
 const text = {
   saveError:
-    "\u062a\u0639\u0630\u0631 \u062d\u0641\u0638 \u0627\u0644\u0645\u0633\u062a\u0646\u062f. \u062a\u0623\u0643\u062f \u0623\u0646 \u0627\u0644\u0646\u0635 \u0644\u0627 \u064a\u0642\u0644 \u0639\u0646 20 \u062d\u0631\u0641\u0627.",
+    "\u062a\u0639\u0630\u0631 \u062d\u0641\u0638 \u0627\u0644\u0645\u0635\u062f\u0631. \u0633\u064a\u0638\u0647\u0631 \u0633\u0628\u0628 \u0627\u0644\u0641\u0634\u0644 \u0645\u0646 \u0627\u0644\u062e\u0627\u062f\u0645 \u0647\u0646\u0627.",
   updateError:
     "\u062a\u0639\u0630\u0631 \u062a\u062d\u062f\u064a\u062b \u062d\u0627\u0644\u0629 \u0627\u0644\u0645\u0633\u062a\u0646\u062f.",
   deleteError:
@@ -86,6 +90,11 @@ const text = {
     "\u062d\u0641\u0638 \u0628\u0639\u062f \u0627\u0644\u0645\u0631\u0627\u062c\u0639\u0629",
   clearPreview:
     "\u0625\u0644\u063a\u0627\u0621 \u0627\u0644\u0645\u0639\u0627\u064a\u0646\u0629",
+  edit: "تعديل",
+  editTitle: "تعديل مصدر المعرفة",
+  saveChanges: "حفظ التعديلات",
+  cancelEdit: "إلغاء",
+  editSuccess: "تم تحديث المصدر.",
   previewEmpty:
     "\u0627\u0644\u0646\u0635 \u0627\u0644\u0645\u0633\u062a\u062e\u0631\u062c \u0641\u0627\u0631\u063a. \u0631\u0627\u062c\u0639 \u0627\u0644\u0645\u0644\u0641 \u0623\u0648 \u062c\u0631\u0628 \u0645\u0644\u0641\u0627 \u0622\u062e\u0631.",
 };
@@ -111,33 +120,40 @@ export function KnowledgeWorkspace({ documents }: { documents: KnowledgeDocument
   const [uploadSourceName, setUploadSourceName] = useState("");
   const [selectedFile, setSelectedFile] = useState<File | null>(null);
   const [preview, setPreview] = useState<UploadPreview | null>(null);
+  const [editingId, setEditingId] = useState<string | null>(null);
+  const [editTitle, setEditTitle] = useState("");
+  const [editSourceName, setEditSourceName] = useState("");
+  const [editContent, setEditContent] = useState("");
   const [error, setError] = useState("");
+  const [success, setSuccess] = useState("");
   const [pending, startTransition] = useTransition();
 
   async function createDocument() {
     if (!title.trim() || !content.trim() || pending) return;
 
     setError("");
+    setSuccess("");
 
     const response = await fetch("/api/knowledge", {
       method: "POST",
       headers: { "content-type": "application/json" },
       body: JSON.stringify({
-        title,
-        sourceName: sourceName || undefined,
-        content,
+        title: title.trim(),
+        sourceName: sourceName.trim() || undefined,
+        content: content.trim(),
         status: "CURRENT",
       }),
     });
 
     if (!response.ok) {
-      setError(text.saveError);
+      setError(await getKnowledgeSaveError(response));
       return;
     }
 
     setTitle("");
     setSourceName("");
     setContent("");
+    setSuccess("تم حفظ المصدر.");
     startTransition(() => router.refresh());
   }
 
@@ -145,6 +161,7 @@ export function KnowledgeWorkspace({ documents }: { documents: KnowledgeDocument
     if (!selectedFile || pending) return;
 
     setError("");
+    setSuccess("");
 
     const formData = new FormData();
     formData.set("file", selectedFile);
@@ -186,15 +203,15 @@ export function KnowledgeWorkspace({ documents }: { documents: KnowledgeDocument
       method: "POST",
       headers: { "content-type": "application/json" },
       body: JSON.stringify({
-        title: preview.title,
-        sourceName: preview.sourceName || preview.originalFilename || undefined,
-        content: preview.content,
+        title: preview.title.trim(),
+        sourceName: preview.sourceName?.trim() || preview.originalFilename || undefined,
+        content: preview.content.trim(),
         status: "CURRENT",
       }),
     });
 
     if (!response.ok) {
-      setError(text.saveError);
+      setError(await getKnowledgeSaveError(response));
       return;
     }
 
@@ -202,6 +219,7 @@ export function KnowledgeWorkspace({ documents }: { documents: KnowledgeDocument
     setUploadSourceName("");
     setSelectedFile(null);
     clearPreview();
+    setSuccess("تم حفظ المصدر.");
     startTransition(() => router.refresh());
   }
 
@@ -209,10 +227,53 @@ export function KnowledgeWorkspace({ documents }: { documents: KnowledgeDocument
     setPreview(null);
   }
 
+  function startEdit(document: KnowledgeDocumentRow) {
+    setEditingId(document.id);
+    setEditTitle(document.title);
+    setEditSourceName(document.sourceName ?? "");
+    setEditContent(document.content);
+    setError("");
+    setSuccess("");
+  }
+
+  function cancelEdit() {
+    setEditingId(null);
+    setEditTitle("");
+    setEditSourceName("");
+    setEditContent("");
+  }
+
+  async function saveEdit() {
+    if (!editingId || !editTitle.trim() || editContent.trim().length < 20 || pending) return;
+
+    setError("");
+    setSuccess("");
+
+    const response = await fetch(`/api/knowledge/${editingId}`, {
+      method: "PATCH",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        title: editTitle.trim(),
+        sourceName: editSourceName.trim() || null,
+        content: editContent.trim(),
+      }),
+    });
+
+    if (!response.ok) {
+      setError(await getKnowledgeSaveError(response));
+      return;
+    }
+
+    cancelEdit();
+    setSuccess(text.editSuccess);
+    startTransition(() => router.refresh());
+  }
+
   async function updateStatus(documentId: string, status: KnowledgeDocumentStatus) {
     if (pending) return;
 
     setError("");
+    setSuccess("");
 
     const response = await fetch(`/api/knowledge/${documentId}`, {
       method: "PATCH",
@@ -225,6 +286,7 @@ export function KnowledgeWorkspace({ documents }: { documents: KnowledgeDocument
       return;
     }
 
+    setSuccess("تم تحديث حالة المصدر.");
     startTransition(() => router.refresh());
   }
 
@@ -232,6 +294,7 @@ export function KnowledgeWorkspace({ documents }: { documents: KnowledgeDocument
     if (pending) return;
 
     setError("");
+    setSuccess("");
 
     const response = await fetch(`/api/knowledge/${documentId}`, { method: "DELETE" });
     if (!response.ok) {
@@ -239,6 +302,7 @@ export function KnowledgeWorkspace({ documents }: { documents: KnowledgeDocument
       return;
     }
 
+    setSuccess("تم حذف المصدر.");
     startTransition(() => router.refresh());
   }
 
@@ -273,6 +337,13 @@ export function KnowledgeWorkspace({ documents }: { documents: KnowledgeDocument
                 </div>
 
                 <div className="flex flex-wrap gap-2">
+                  <button
+                    onClick={() => startEdit(document)}
+                    className="inline-flex h-10 items-center justify-center gap-2 rounded-xl border border-blue-100 bg-blue-50 px-3 text-sm font-medium text-blue-700 transition hover:bg-blue-100"
+                  >
+                    <Pencil size={16} aria-hidden="true" />
+                    {text.edit}
+                  </button>
                   {document.status !== "CURRENT" ? (
                     <button
                       onClick={() => updateStatus(document.id, "CURRENT")}
@@ -314,6 +385,73 @@ export function KnowledgeWorkspace({ documents }: { documents: KnowledgeDocument
       </section>
 
       <aside className="app-card p-5">
+        {editingId ? (
+          <div className="mb-6 border-b border-slate-200 pb-5">
+            <div className="flex items-center justify-between gap-3">
+              <div className="flex items-center gap-2">
+                <Pencil size={18} className="text-blue-700" aria-hidden="true" />
+                <h3 className="font-semibold">{text.editTitle}</h3>
+              </div>
+              <button
+                onClick={cancelEdit}
+                disabled={pending}
+                className="inline-flex size-9 items-center justify-center rounded-xl border border-slate-200 bg-white text-slate-600 transition hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-60"
+                aria-label={text.cancelEdit}
+              >
+                <X size={16} aria-hidden="true" />
+              </button>
+            </div>
+
+            <div className="mt-4 space-y-3">
+              <label className="block">
+                <span className="text-sm font-medium">{text.titleLabel}</span>
+                <input
+                  value={editTitle}
+                  onChange={(event) => setEditTitle(event.target.value)}
+                  className="field-shell mt-2 h-11 w-full rounded-xl px-3 text-sm outline-none"
+                  placeholder={text.titlePlaceholder}
+                />
+              </label>
+              <label className="block">
+                <span className="text-sm font-medium">{text.sourceLabel}</span>
+                <input
+                  value={editSourceName}
+                  onChange={(event) => setEditSourceName(event.target.value)}
+                  className="field-shell mt-2 h-11 w-full rounded-xl px-3 text-sm outline-none"
+                  placeholder={text.optional}
+                />
+              </label>
+              <label className="block">
+                <span className="text-sm font-medium">{text.contentLabel}</span>
+                <textarea
+                  value={editContent}
+                  onChange={(event) => setEditContent(event.target.value)}
+                  className="field-shell mt-2 min-h-64 w-full resize-y rounded-xl p-3 text-sm leading-7 outline-none"
+                  placeholder={text.contentPlaceholder}
+                />
+              </label>
+              <div className="flex flex-col gap-2 sm:flex-row">
+                <button
+                  onClick={saveEdit}
+                  disabled={pending || !editTitle.trim() || editContent.trim().length < 20}
+                  className="btn-primary inline-flex h-11 flex-1 items-center justify-center gap-2 rounded-xl px-4 text-sm font-medium disabled:cursor-not-allowed disabled:opacity-60"
+                >
+                  <CheckCircle2 size={17} aria-hidden="true" />
+                  {text.saveChanges}
+                </button>
+                <button
+                  onClick={cancelEdit}
+                  disabled={pending}
+                  className="btn-secondary inline-flex h-11 items-center justify-center gap-2 rounded-xl px-4 text-sm font-medium disabled:cursor-not-allowed disabled:opacity-60"
+                >
+                  <X size={16} aria-hidden="true" />
+                  {text.cancelEdit}
+                </button>
+              </div>
+            </div>
+          </div>
+        ) : null}
+
         <div className="flex items-center gap-2">
           <Plus size={18} className="text-teal-700" aria-hidden="true" />
           <h3 className="font-semibold">{text.addTitle}</h3>
@@ -355,6 +493,7 @@ export function KnowledgeWorkspace({ documents }: { documents: KnowledgeDocument
             <Plus size={17} aria-hidden="true" />
             {text.saveKnowledge}
           </button>
+          {success ? <p className="text-sm font-medium text-emerald-700">{success}</p> : null}
           {error ? <p className="text-sm font-medium text-rose-600">{error}</p> : null}
         </div>
 
@@ -509,6 +648,27 @@ function filenameWithoutExtension(filename: string) {
   const trimmed = filename.trim();
   const dotIndex = trimmed.lastIndexOf(".");
   return dotIndex > 0 ? trimmed.slice(0, dotIndex) : trimmed;
+}
+
+async function getKnowledgeSaveError(response: Response) {
+  const payload = (await response.json().catch(() => null)) as {
+    error?: string;
+    issues?: {
+      fieldErrors?: Record<string, string[]>;
+      formErrors?: string[];
+    };
+  } | null;
+
+  if (response.status === 401) return "انتهت الجلسة. سجل الدخول مرة أخرى ثم حاول الحفظ.";
+  if (response.status === 403) return "ليس لديك صلاحية لإضافة مصادر معرفة. استخدم حساب مالك أو مدير.";
+
+  const fieldErrors = payload?.issues?.fieldErrors;
+  if (fieldErrors?.content?.length) return `تعذر حفظ المستند: ${fieldErrors.content[0]}`;
+  if (fieldErrors?.title?.length) return `تعذر حفظ المستند: ${fieldErrors.title[0]}`;
+  if (payload?.issues?.formErrors?.length) return `تعذر حفظ المستند: ${payload.issues.formErrors[0]}`;
+  if (payload?.error) return `تعذر حفظ المستند: ${payload.error}`;
+
+  return text.saveError;
 }
 
 function mapUploadError(error?: string) {

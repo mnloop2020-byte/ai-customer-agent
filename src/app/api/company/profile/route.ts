@@ -55,14 +55,17 @@ export async function PUT(request: Request) {
     });
 
     await tx.service.deleteMany({ where: { companyId: user.companyId } });
-    await tx.service.createMany({
-      data: parsed.data.services.map((service) => ({
-        companyId: user.companyId,
-        name: service.name,
-        description: service.description,
-        priceLabel: service.price,
-      })),
-    });
+
+    if (parsed.data.services.length) {
+      await tx.service.createMany({
+        data: parsed.data.services.map((service) => ({
+          companyId: user.companyId,
+          name: service.name,
+          description: service.description,
+          priceLabel: service.price,
+        })),
+      });
+    }
   });
 
   const profile = await getCompanyProfile(user.companyId);

@@ -4,6 +4,7 @@ import { getCurrentUser } from "@/lib/auth/session";
 import { prisma } from "@/lib/db";
 import { readJsonBody } from "@/lib/http/read-json";
 import { canManageKnowledge } from "@/lib/auth/roles";
+import { updateKnowledgeDocument } from "@/lib/knowledge";
 
 type RouteContext = {
   params: Promise<{
@@ -73,30 +74,33 @@ export async function PATCH(request: Request, context: RouteContext) {
   }
 
   const { documentId } = await context.params;
-  const updated = await prisma.knowledgeDocument.updateMany({
-    where: {
-      id: documentId,
-      companyId: user.companyId,
-    },
-    data: {
-      status: parsed.data.status,
-    },
+  const document = await updateKnowledgeDocument({
+    companyId: user.companyId,
+    documentId,
+    title: parsed.data.title,
+    content: parsed.data.content,
+    sourceName: parsed.data.sourceName,
+    status: parsed.data.status,
   });
 
-  if (!updated.count) {
+  if (!document) {
     return NextResponse.json({ error: "Document not found" }, { status: 404 });
   }
+
+  const changedFields = Object.entries(parsed.data)
+    .filter(([, value]) => value !== undefined)
+    .map(([key]) => key);
 
   await prisma.auditLog.create({
     data: {
       companyId: user.companyId,
       actorId: user.id,
-      action: "knowledge.status.update",
+      action: changedFields.length === 1 && changedFields[0] === "status" ? "knowledge.status.update" : "knowledge.update",
       entity: "KnowledgeDocument",
       entityId: documentId,
-      metadata: { status: parsed.data.status },
+      metadata: { changedFields, status: document.status },
     },
   });
 
-  return NextResponse.json({ ok: true });
+  return NextResponse.json({ ok: true, document });
 }
