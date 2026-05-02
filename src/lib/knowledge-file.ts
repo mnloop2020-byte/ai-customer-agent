@@ -1,9 +1,4 @@
-import path from "node:path";
-import { pathToFileURL } from "node:url";
-import { PDFParse } from "pdf-parse";
-
 const maxUploadSizeBytes = 10 * 1024 * 1024;
-let pdfWorkerConfigured = false;
 
 export async function extractKnowledgeContentFromFile(file: File) {
   if (file.size <= 0) {
@@ -33,17 +28,29 @@ export async function extractKnowledgeContentFromFile(file: File) {
   throw new Error("UNSUPPORTED_FILE_TYPE");
 }
 
-async function extractPdfText(file: File) {
-  configurePdfWorker();
-  const buffer = Buffer.from(await file.arrayBuffer());
-  const parser = new PDFParse({ data: buffer });
-
+async function extractPdfText(file: File): Promise<string> {
   try {
-    const result = await parser.getText();
-    return normalizeExtractedText(result.text);
-  } finally {
-    await parser.destroy();
+    // Use dynamic import to avoid DOMMatrix issue on Vercel
+    const pdfParse = (await import("pdf-parse")).default;
+    const buffer = Buffer.from(await file.arrayBuffer());
+    const data = await pdfParse(buffer);
+    return normalizeExtractedText(data.text);
+  } catch {
+    // Fallback: try to extract text directly from buffer
+    const buffer = Buffer.from(await file.arrayBuffer());
+    const text = extractTextFromPdfBuffer(buffer);
+    if (text.length > 10) return normalizeExtractedText(text);
+    throw new Error("PDF_PARSE_FAILED");
   }
+}
+
+function extractTextFromPdfBuffer(buffer: Buffer): string {
+  const content = buffer.toString("latin1");
+  const textMatches = content.match(/\(([^)]{2,})\)/g) ?? [];
+  return textMatches
+    .map((match) => match.slice(1, -1))
+    .filter((text) => /[\u0020-\u007E\u0600-\u06FF]/.test(text))
+    .join(" ");
 }
 
 function normalizeExtractedText(value: string) {
@@ -52,12 +59,4 @@ function normalizeExtractedText(value: string) {
     .replace(/[\u0001-\u0008\u000b\u000c\u000e-\u001f\u007f]/g, " ")
     .replace(/\s+/g, " ")
     .trim();
-}
-
-function configurePdfWorker() {
-  if (pdfWorkerConfigured) return;
-
-  const workerPath = path.resolve(process.cwd(), "node_modules", "pdfjs-dist", "legacy", "build", "pdf.worker.mjs");
-  PDFParse.setWorker(pathToFileURL(workerPath).href);
-  pdfWorkerConfigured = true;
 }
