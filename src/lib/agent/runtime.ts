@@ -68,7 +68,6 @@ export async function runAgentTurn({ companyId, companyProfile, message }: RunAg
     where: { id: conversationContext.lead.id },
     data: {
       score: leadState.score,
-      status: leadState.status,
       lastSummary: `Intent: ${leadState.intent} | Temp: ${leadState.temperature}`,
     },
   });
