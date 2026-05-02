@@ -189,10 +189,10 @@ function classifyWithLocalFallback(message: string): Pick<SemanticIntentClassifi
   if (/(عرض سعر|باقة|اشتراك)/u.test(normalized)) {
     intents.push({ intent: "ASK_QUOTE", confidence: 0.82, reason: "local quote cue" });
   }
-  if (/(وين|اين|أين|موقع|مناطق|السعودية|تقدمون)/u.test(normalized)) {
+  if (/(وين|اين|أين|موقع[^ن]|مناطق|السعودية)/u.test(normalized)) {
     intents.push({ intent: "ASK_LOCATION", confidence: 0.8, reason: "local location cue" });
   }
-  if (/(وش تقدمون|ماذا تقدمون|الخدمات|خدماتكم)/u.test(normalized)) {
+  if (/(وش تقدمون|ايش تقدمون|ماذا تقدمون|ما الخدمات|خدماتكم|الخدمات التي|ما الذي تقدم|تقدمونها)/u.test(normalized)) {
     intents.push({ intent: "ASK_SERVICE", confidence: 0.82, reason: "local service cue" });
   }
   if (/(كيف يشتغل|كيف يعمل|اشرح الطريقة|طريقة العمل|واتساب|whatsapp)/iu.test(normalized)) {

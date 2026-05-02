@@ -268,14 +268,6 @@ export function analyzeIncomingMessage(input: IncomingMessage): AgentDecision {
     previousStageMemory,
   );
   const missingFields = determineMissingFields(intent, mergedLead, qualificationStatus, preliminaryCustomerContext);
-  if (
-    directAnswerIntent &&
-    ["ASK_SERVICE", "ASK_HOW_IT_WORKS"].includes(directAnswerIntent) &&
-    missingFields.some((field) => field === "messages_per_day" || field === "team_size")
-  ) {
-    directAnswerIntents = [];
-    directAnswerIntent = undefined;
-  }
   const askedFields = readAskedFields(history);
   const focusField = determineFocusField(missingFields, askedFields, history);
   const antiRepetition = buildAntiRepetitionMemory(history, focusField);
@@ -988,11 +980,15 @@ function chooseRoute(
   if (intent === "Greeting" && isPureGreetingMessage(rawMessage)) return "DIRECT_ANSWER";
 
   if (
-    ["Greeting", "Capabilities Question"].includes(intent) &&
-    missingFields.some((field) => field === "messages_per_day" || field === "team_size")
-  ) {
-    return "QUALIFY";
-  }
+  intent === "Greeting" &&
+  missingFields.some((field) => field === "messages_per_day" || field === "team_size")
+) {
+  return "QUALIFY";
+}
+
+if (intent === "Capabilities Question") {
+  return "DIRECT_ANSWER";
+}
 
   if (["Greeting", "Identity Question", "Capabilities Question", "Hours Question", "Location Question", "Quote Request", "Answer Reason Question", "Direct Explanation Request", "Unclear Reply"].includes(intent)) {
     return "DIRECT_ANSWER";

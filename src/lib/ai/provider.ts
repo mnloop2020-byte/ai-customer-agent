@@ -381,13 +381,11 @@ function buildMockReplyFromContract(input: GenerateReplyInput, content: Resolved
   if (needs.has("whatsapp")) return content.whatsapp;
   if (needs.has("custom_quote_handoff")) return content.handoff;
   if (needs.has("clarification")) return "ما فهمت قصدك تمامًا. ممكن توضحها بجملة قصيرة؟";
-  if (needs.has("service") && needs.has("how_it_works")) {
-    return "نقدم نظامًا يساعد الشركات على تنظيم رسائل العملاء وتسريع الردود باستخدام معلومات الشركة. ينظم المحادثات، يرد على الأسئلة المتكررة، ويحوّل الحالات المهمة إلى متابعة واضحة.";
-  }
+  if (needs.has("service") && needs.has("how_it_works")) return `${content.service}. ${content.howItWorks}`;
   if (needs.has("how_it_works")) return `ينظم الرسائل والمحادثات، يرد على الأسئلة المتكررة من معرفة الشركة، ويحول الحالات المهمة إلى متابعة أو مندوب.`;
   if (needs.has("service")) return `نقدم خدمة تساعدك على إدارة محادثات العملاء والردود والمتابعة. ينظم الرسائل والمحادثات ويرد على الأسئلة المتكررة من معرفة الشركة.`;
   if (needs.has("objection")) {
-    return "أتفهم ملاحظتك. الأهم نقيس القيمة مقابل الوقت والضغط الذي يقلله النظام، خصوصًا عند وجود رسائل متكررة ومتابعات كثيرة.";
+    return "أتفهم ملاحظتك. الأهم نقيس السعر مقابل الوقت والضغط الذي يقلله النظام، خصوصًا عند وجود رسائل متكررة ومتابعات كثيرة.";
   }
   if (needs.has("qualification_question")) {
     if (contract.nextAction === "ASK_MESSAGES_PER_DAY") {
@@ -571,7 +569,7 @@ function buildPrompt(input: GenerateReplyInput, correction: string | undefined, 
 
 function buildSystemPrompt(companyProfile: CompanyProfile, hasKnowledgeResults: boolean) {
   const basePrompt = [
-    "You are a professional Arabic sales agent for MNtechnique.",
+    `You are a professional Arabic sales agent for ${companyProfile.name}.`,
     "Reply in Arabic only, concise and helpful.",
     "Write like a real live-chat customer success representative, not like software.",
     "Never mention AI, bot, model, prompt, policy, route, score, analysis, system, or customer context to the customer.",
@@ -599,7 +597,13 @@ function buildSystemPrompt(companyProfile: CompanyProfile, hasKnowledgeResults: 
     "Always prefer the most recent, most explicit, or clearly marked current/latest information.",
     "Never use knowledge marked old, outdated, previous, deprecated, not valid, cancelled, or expired.",
     "Never combine conflicting values. Return one correct answer only.",
-    'If information is missing, say exactly: "I don\'t have that information"',
+     "If information is missing, say exactly that you do not have that information.",
+    "CRITICAL BREVITY RULES:",
+    "- Maximum reply length: 3 sentences.",
+    "- Never copy-paste knowledge content directly. Always summarize in your own words.",
+    "- For service questions: list services as 2-3 bullet points maximum, then ask one question.",
+    "- For price questions: mention service name + price only, no extra details unless asked.",
+    "- Never output more than 60 words in a single reply.",
     "",
     `Company: ${companyProfile.name}`,
     `Industry: ${companyProfile.industry}`,
@@ -699,7 +703,7 @@ function buildUserPrompt({ customerMessage, decision, knowledgeResults = [] }: G
     ...(knowledgeResults.length
       ? knowledgeResults.map(
           (result, index) =>
-            `- Priority ${index + 1} | Score ${result.score} | ${result.documentTitle}: ${result.content}`,
+            `- Priority ${index + 1} | Score ${result.score} | ${result.documentTitle}: ${result.content.slice(0, 300)}`,
         )
       : ["none"]),
     "",
