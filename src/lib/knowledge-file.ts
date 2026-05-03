@@ -30,13 +30,12 @@ export async function extractKnowledgeContentFromFile(file: File) {
 
 async function extractPdfText(file: File): Promise<string> {
   try {
-    // Use dynamic import to avoid DOMMatrix issue on Vercel
-    const pdfParse = (await import("pdf-parse")).default;
+    // eslint-disable-next-line @typescript-eslint/no-require-imports
+    const pdfParse = require("pdf-parse") as (buffer: Buffer) => Promise<{ text: string }>;
     const buffer = Buffer.from(await file.arrayBuffer());
     const data = await pdfParse(buffer);
     return normalizeExtractedText(data.text);
   } catch {
-    // Fallback: try to extract text directly from buffer
     const buffer = Buffer.from(await file.arrayBuffer());
     const text = extractTextFromPdfBuffer(buffer);
     if (text.length > 10) return normalizeExtractedText(text);
