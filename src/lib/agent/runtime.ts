@@ -211,15 +211,196 @@ export async function runAgentTurn({ companyId, companyProfile, message }: RunAg
   };
 }
 
-/* ─── System Prompt ─── */
-const DEFAULT_EXECUTION_RULES = `[الأوامر الإلزامية - أعلى أولوية]
-- يمنع استخدام أي رد جاهز أو عام.
-- يمنع البدء بسؤال. كل رد يبدأ بجملة فائدة أو إقناع ملموس.
-- إذا كانت رسالة العميل تحتوي على اعتراض → قدّم إقناعاً مباشراً أولاً ثم سؤالاً واحداً.
-- كل رد: فائدة مرتبطة بكلام العميل + سؤال واحد فقط.
-- يمنع اختراع معلومات غير موجودة في مصادر المعرفة.
-- إذا سأل العميل عن السعر → اذكر السعر مباشرة قبل أي إقناع.
-- إذا أظهر جاهزية → رشّح الباقة المناسبة وأعطِ خطوة بدء واضحة فوراً.`;
+/* ════════════════════════════════════════════════════════════
+   SYSTEM PROMPT — Execution Contract
+   ════════════════════════════════════════════════════════════ */
+
+/**
+ * بناء قواعد الحظر المطلق بناءً على المرحلة الحالية.
+ * هذه القواعد تُوضع في أعلى الـ prompt وهي غير قابلة للتجاوز.
+ */
+function buildHardProhibitions(
+  stage: ConversationPhase,
+  route: string,
+  hasObjection: boolean,
+): string {
+  const base = [
+    "❌ يُحظر تماماً: الرد العام أو المقدمات الفارغة مثل 'بالطبع' أو 'بالتأكيد' أو 'شكراً لتواصلك'.",
+    "❌ يُحظر تماماً: البدء بسؤال. كل رد يبدأ بجملة فائدة أو إقناع ملموس.",
+    "❌ يُحظر تماماً: اختراع معلومات غير موجودة في مصادر المعرفة.",
+    "❌ يُحظر تماماً: أكثر من سؤال واحد في نفس الرد.",
+  ];
+
+  // حظر خاص بكل مرحلة
+  const stageProhibitions: Partial<Record<ConversationPhase, string[]>> = {
+    DISCOVERY: [
+      "❌ يُحظر في هذه المرحلة: ذكر الأسعار أو الباقات قبل فهم وضع العميل.",
+      "❌ يُحظر في هذه المرحلة: عرض الخيارات أو الحلول قبل كشف المشكلة.",
+    ],
+    QUALIFICATION: [
+      "❌ يُحظر في هذه المرحلة: الانتقال للأسعار قبل الحصول على المعلومات المطلوبة.",
+    ],
+    VALUE_BUILDING: [
+      "❌ يُحظر في هذه المرحلة: ذكر المنافسين أو المقارنات.",
+      "❌ يُحظر في هذه المرحلة: طرح أسئلة تأهيل جديدة.",
+    ],
+    OBJECTION_HANDLING: [
+      "❌ يُحظر في هذه المرحلة: تجاهل الاعتراض والانتقال لموضوع آخر.",
+      "❌ يُحظر في هذه المرحلة: التراجع عن السعر أو تقديم خصم غير مصرح به.",
+      "❌ يُحظر في هذه المرحلة: الاعتذار عن السعر.",
+    ],
+    OFFER: [
+      "❌ يُحظر في هذه المرحلة: إخفاء السعر أو التحايل على ذكره.",
+      "❌ يُحظر في هذه المرحلة: طرح أسئلة تأهيل بعد ذكر السعر.",
+    ],
+    CLOSING: [
+      "❌ يُحظر في هذه المرحلة: طرح أسئلة جديدة تُعيق القرار.",
+      "❌ يُحظر في هذه المرحلة: إعادة شرح الخدمة من البداية.",
+      "❌ يُحظر في هذه المرحلة: إعطاء خيارات كثيرة تُشتت العميل.",
+    ],
+    HANDOFF: [
+      "❌ يُحظر في هذه المرحلة: محاولة الإغلاق بدلاً من التحويل.",
+    ],
+  };
+
+  const specific = stageProhibitions[stage] ?? [];
+
+  // حظر إضافي عند وجود اعتراض في مراحل غير OBJECTION_HANDLING
+  const objectionExtra = hasObjection && stage !== "OBJECTION_HANDLING"
+    ? ["❌ يُحظر: تجاهل الاعتراض الذي ذكره العميل. يجب معالجته أولاً."]
+    : [];
+
+  return [...base, ...specific, ...objectionExtra].join("\n");
+}
+
+/**
+ * بناء عقد التنفيذ الإلزامي لكل مرحلة.
+ * هذا هو القالب الذي يجب أن يلتزم به الـ LLM حرفياً.
+ */
+function buildExecutionContract(
+  stage: ConversationPhase,
+  route: string,
+  nextAction: string,
+  temperature: string,
+  hasObjection: boolean,
+  objectionType: string,
+  missingFields: string[],
+): string {
+  const header = `[عقد التنفيذ — المرحلة: ${stageLabel(stage)} | المسار: ${route}]`;
+
+  // ── HANDOFF ──
+  if (route === "HUMAN_HANDOFF" || stage === "HANDOFF") {
+    return `${header}
+الإجراء الإلزامي:
+1. أخبر العميل أنك ستوصله بمندوب متخصص الآن.
+2. إذا لم يكن هناك رقم تواصل → اطلبه بجملة واحدة.
+3. لا تحاول الإغلاق بنفسك.
+القالب: [جملة تطمين] + [طلب معلومة تواصل إن لزم]`;
+  }
+
+  // ── CLOSING / BOOKING ──
+  if (stage === "CLOSING" || route === "BOOKING" || nextAction === "CONFIRM_READINESS") {
+    return `${header}
+الإجراء الإلزامي:
+1. رشّح الباقة المناسبة بناءً على ما عرفته عن العميل (جملة واحدة).
+2. أعطِ خطوة بدء واحدة واضحة ومحددة (رابط / رقم / إجراء).
+3. لا تسأل أي سؤال جديد.
+القالب: [باقة مقترحة + سبب] + [خطوة البدء الآن]`;
+  }
+
+  // ── OBJECTION_HANDLING ──
+  if (stage === "OBJECTION_HANDLING" || hasObjection) {
+    if (objectionType === "PRICE") {
+      return `${header}
+الإجراء الإلزامي — اعتراض السعر:
+1. أعد تأطير القيمة بنتيجة ملموسة (وفّر وقت / زيادة مبيعات / تقليل تكلفة).
+2. لا تتراجع عن السعر ولا تعتذر عنه.
+3. اكشف السبب الحقيقي بسؤال واحد: "هل الموضوع السعر تحديداً أم هناك شيء آخر؟"
+القالب: [قيمة ملموسة بأرقام] + [إعادة تأطير] + [سؤال كشف السبب]`;
+    }
+    if (objectionType === "TIMING") {
+      return `${header}
+الإجراء الإلزامي — اعتراض التوقيت:
+1. اعترف بالتوقيت دون إلحاح.
+2. أوجد urgency ملموسة (فرصة محدودة / تكلفة التأخير).
+3. سؤال واحد: "ما الذي يجعل الوقت الحالي غير مناسب؟"
+القالب: [اعتراف] + [تكلفة التأخير] + [سؤال]`;
+    }
+    if (objectionType === "TRUST") {
+      return `${header}
+الإجراء الإلزامي — اعتراض الثقة:
+1. قدّم دليلاً اجتماعياً من مصادر المعرفة (عميل / نتيجة حقيقية).
+2. عرض تجربة أو ضمان إن وُجد.
+3. سؤال واحد يُقرّب: "ما الذي سيجعلك أكثر اطمئناناً؟"
+القالب: [دليل ملموس] + [ضمان/تجربة] + [سؤال]`;
+    }
+    // اعتراض عام
+    return `${header}
+الإجراء الإلزامي — اعتراض (${objectionType}):
+1. اعترف بالاعتراض بجملة واحدة.
+2. أعد تأطير المشكلة من زاوية العميل.
+3. سؤال واحد يكشف السبب الحقيقي.
+القالب: [اعتراف] + [إعادة تأطير] + [سؤال تشخيصي]`;
+  }
+
+  // ── OFFER / PRESENT_PRICE ──
+  if (stage === "OFFER" || route === "PRESENT_OFFER" || nextAction === "PRESENT_PRICE") {
+    return `${header}
+الإجراء الإلزامي:
+1. اذكر السعر والباقات مباشرة في السطر الأول — لا مقدمات.
+2. اربط الباقة بوضع العميل المحدد (ما ذكره من رسائل / فريق / مشكلة).
+3. سؤال واحد يُقرّب القرار: "أيهما يناسبك أكثر؟" أو "متى تريد البدء؟"
+القالب: [سعر + باقة مباشرة] + [ربط بوضع العميل] + [سؤال إغلاق]`;
+  }
+
+  // ── VALUE_BUILDING ──
+  if (stage === "VALUE_BUILDING" || nextAction === "BUILD_VALUE") {
+    return `${header}
+الإجراء الإلزامي:
+1. قدّم فائدة ملموسة بأرقام أو نتيجة واضحة (ليس ميزة تقنية).
+2. اربطها بمشكلة ذكرها العميل أو وضعه المفهوم من السياق.
+3. سؤال واحد يدفع للأمام.
+القالب: [فائدة بنتيجة ملموسة] + [ربط بوضع العميل] + [سؤال]
+مثال: "النظام يوفر على الفريق ساعتين يومياً في الرد — بالنسبة لوضعكم [كذا]، كيف تتعاملون مع هذا الحجم حالياً؟"`;
+  }
+
+  // ── QUALIFICATION ──
+  if (stage === "QUALIFICATION" || nextAction === "ASK_QUALIFYING_QUESTION") {
+    const questionMap: Record<string, string> = {
+      messages_per_day: "كم رسالة تستقبلون يومياً تقريباً؟",
+      team_size:        "كم شخص يرد على رسائل العملاء حالياً؟",
+    };
+    const q = missingFields.length > 0
+      ? (questionMap[missingFields[0]] ?? "ما التحدي الأكبر الذي تواجهونه في التواصل مع العملاء؟")
+      : "ما التحدي الأكبر الذي تواجهونه في التواصل مع العملاء؟";
+
+    return `${header}
+الإجراء الإلزامي:
+1. ابدأ بجملة فائدة واحدة عن النظام (لا تتجاوز سطراً).
+2. اسأل هذا السؤال تحديداً: "${q}"
+3. سؤال واحد فقط — لا تسأل أكثر.
+القالب: [جملة فائدة] + ["${q}"]`;
+  }
+
+  // ── DISCOVERY ──
+  if (stage === "DISCOVERY") {
+    return `${header}
+الإجراء الإلزامي:
+1. أجب على ما سأل عنه العميل بشكل مباشر ومفيد.
+2. أضف جملة تكشف تكلفة المشكلة أو الفرصة الضائعة (pressure خفيف).
+3. سؤال واحد يكشف حجم التحدي الحقيقي.
+القالب: [إجابة مباشرة] + [تكلفة المشكلة] + [سؤال كشف]
+مثال: "كثير من الشركات تخسر عملاء بسبب بطء الرد — كيف تتعاملون مع الرسائل خارج أوقات الدوام؟"`;
+  }
+
+  // ── DEFAULT / DIRECT_ANSWER ──
+  return `${header}
+الإجراء الإلزامي:
+1. أجب على سؤال العميل بشكل مباشر ومفيد.
+2. أضف جملة تربط الإجابة بفائدة ملموسة.
+3. سؤال واحد فقط يساعد على التقدم.
+القالب: [إجابة مباشرة] + [فائدة ملموسة] + [سؤال]`;
+}
 
 function buildSystemPrompt(input: {
   companyProfile:   CompanyProfile;
@@ -232,70 +413,76 @@ function buildSystemPrompt(input: {
   objectionType:    string;
   ctaButtons:       ReturnType<typeof buildCtaButtons>;
 }): string {
-  const { companyProfile: p, knowledgeResults, scoring, routing, intent, missingFields, hasObjection, objectionType, ctaButtons } = input;
+  const {
+    companyProfile: p, knowledgeResults, scoring, routing,
+    intent, missingFields, hasObjection, objectionType, ctaButtons,
+  } = input;
 
   const services  = p.services.map(s => `- ${s.name}: ${s.description} | السعر: ${s.price}`).join("\n");
   const knowledge = knowledgeResults.length
     ? knowledgeResults.map((r, i) => `[${i + 1}] ${r.documentTitle}:\n${r.content.slice(0, 400)}`).join("\n\n")
     : "لا توجد معلومات إضافية.";
 
-  const executionRules = p.executionRules?.trim()
-    ? `[الأوامر الإلزامية]\n${p.executionRules.trim()}`
-    : DEFAULT_EXECUTION_RULES;
+  // ── 1. الهوية ──
+  const identity = `[الهوية]
+أنت مندوب مبيعات محترف لشركة "${p.name}". تتحدث بالعربية فقط. لا تذكر أنك AI أو نظام آلي.`;
 
-  const salesCtx = `[سياق العميل - محلَّل تلقائياً]
-النية: ${intent} | الدرجة: ${scoring.score}/100 | الحالة: ${scoring.temperature} | المرحلة: ${stageLabel(routing.stage)}
-المسار: ${routing.route} | الخطوة: ${routing.nextAction}${hasObjection ? ` | الاعتراض: ${objectionType}` : ""}${missingFields.length ? ` | حقول مفقودة: ${missingFields.join(",")}` : ""}${ctaButtons.length ? ` | CTA: ${ctaButtons.map(b => b.label).join(" | ")}` : ""}`;
+  // ── 2. حالة العميل الحالية ──
+  const customerState = `[حالة العميل — محلَّلة تلقائياً]
+النية: ${intent}
+الدرجة: ${scoring.score}/100
+الحالة: ${scoring.temperature}
+المرحلة: ${stageLabel(routing.stage)} (${routing.stage})
+المسار: ${routing.route}
+الخطوة: ${routing.nextAction}${hasObjection ? `\nالاعتراض: ${objectionType}` : ""}${missingFields.length ? `\nحقول مفقودة: ${missingFields.join(", ")}` : ""}${ctaButtons.length ? `\nCTA المقترح: ${ctaButtons.map(b => b.label).join(" | ")}` : ""}`;
 
-  const instruction = buildResponseInstruction(routing.route, routing.nextAction, scoring.temperature, hasObjection, objectionType, missingFields);
+  // ── 3. الحظر المطلق (Hard Stop) ──
+  const prohibitions = `[قواعد الحظر المطلق — لا استثناءات]\n${buildHardProhibitions(routing.stage, routing.route, hasObjection)}`;
 
+  // ── 4. عقد التنفيذ الإلزامي ──
+  const contract = buildExecutionContract(
+    routing.stage, routing.route, routing.nextAction,
+    scoring.temperature, hasObjection, objectionType, missingFields,
+  );
+
+  // ── 5. أسلوب الرد ──
+  const tone = `[أسلوب الرد]
+${p.tone || "ودود، احترافي، مباشر. 2-3 جمل فقط."}
+- لا تبدأ بـ "بالطبع" أو "بالتأكيد" أو "شكراً لتواصلك" أو "أهلاً وسهلاً".
+- الرد القصير المباشر أفضل من الرد الطويل العام.
+- تحدث كإنسان محترف، ليس كنظام يقرأ قوائم.`;
+
+  // ── 6. قواعد التصعيد ──
+  const handoff = `[قواعد التصعيد]\n${p.handoffRule || "صعّد عند: طلب صريح لمندوب، شكوى، اعتراض معقد يتجاوز صلاحياتك."}`;
+
+  // ── 7. معلومات الشركة ──
+  const companyInfo = `[معلومات الشركة]
+الاسم: ${p.name} | المجال: ${p.industry}
+${p.description}
+الموقع: ${p.location} | ساعات العمل: ${p.workingHours}
+
+[الخدمات والأسعار]
+${services}
+
+[مصادر المعرفة — استخدمها فقط، لا تخترع]
+${knowledge}`;
+
+  // ترتيب الأقسام: الحظر أولاً → العقد → الهوية → الحالة → الأسلوب → الشركة
   return [
-    executionRules,
+    prohibitions,
     "",
-    `[تعريف الدور]\nأنت مندوب مبيعات محترف لشركة "${p.name}". تتحدث بالعربية فقط. لا تذكر أنك AI.`,
+    contract,
     "",
-    salesCtx,
+    identity,
     "",
-    instruction,
+    customerState,
     "",
-    `[أسلوب الرد]\n${p.tone || "ودود، احترافي، مباشر. 2-3 جمل فقط."}\n- لا تبدأ بـ "بالطبع" أو "بالتأكيد" أو "شكراً لتواصلك".`,
+    tone,
     "",
-    `[قواعد التصعيد]\n${p.handoffRule || "صعّد عند: طلب صريح لمندوب، شكوى، اعتراض معقد."}`,
+    handoff,
     "",
-    `[معلومات الشركة]\nالاسم: ${p.name} | المجال: ${p.industry}\n${p.description}\nالموقع: ${p.location} | ساعات العمل: ${p.workingHours}\n\n[الخدمات والأسعار]\n${services}\n\n[مصادر المعرفة]\n${knowledge}`,
+    companyInfo,
   ].join("\n");
-}
-
-function buildResponseInstruction(
-  route: string, nextAction: string, temperature: string,
-  hasObjection: boolean, objectionType: string, missingFields: string[],
-): string {
-  if (route === "HUMAN_HANDOFF")
-    return `[تعليمات الرد]\nأخبر العميل أنك ستوصله بمندوب الآن. اجمع معلومة تواصل إذا لم تكن موجودة.`;
-
-  if (route === "BOOKING" || nextAction === "CONFIRM_READINESS")
-    return `[تعليمات الرد - إغلاق]\nرشّح الباقة المناسبة بسطر واحد + أعطِ خطوة بدء واضحة ومحددة. لا تسأل أسئلة جديدة.`;
-
-  if (hasObjection && objectionType === "PRICE")
-    return `[تعليمات الرد - اعتراض السعر]\n1. أعد تأطير القيمة بنتيجة ملموسة (توفير وقت / زيادة مبيعات)\n2. لا تتراجع عن السعر\n3. اكشف السبب: "هل الموضوع السعر تحديداً أم شيء آخر؟"`;
-
-  if (hasObjection)
-    return `[تعليمات الرد - اعتراض]\nاعترف + أعد تأطير + سؤال واحد يكشف السبب الحقيقي.`;
-
-  if (route === "PRESENT_OFFER" || nextAction === "PRESENT_PRICE")
-    return `[تعليمات الرد - عرض الأسعار]\nاذكر السعر والباقات مباشرة.\nثم: جملة تربط الباقة بوضع العميل + سؤال واحد يقرّب القرار.`;
-
-  if (nextAction === "BUILD_VALUE")
-    return `[تعليمات الرد - بناء القيمة]\nاشرح فائدة ملموسة (ليس ميزة تقنية) + ربط بمشكلة العميل + سؤال واحد.`;
-
-  if (nextAction === "ASK_QUALIFYING_QUESTION" && missingFields.length > 0) {
-    const q = missingFields[0] === "messages_per_day"
-      ? "كم رسالة تستقبلون يومياً تقريباً؟"
-      : "كم شخص يرد على رسائل العملاء حالياً؟";
-    return `[تعليمات الرد - تأهيل]\nابدأ بجملة فائدة قصيرة عن النظام ثم اسأل: "${q}"\nسؤال واحد فقط.`;
-  }
-
-  return `[تعليمات الرد]\nأجب على سؤال العميل بشكل مباشر ومفيد.\nأضف جملة تربط الإجابة بفائدة ملموسة.\nثم سؤال واحد فقط يساعد على التقدم.`;
 }
 
 /* ─── Messages builder ─── */
