@@ -1,450 +1,375 @@
+/**
+ * runtime.ts — Sales Engine Runtime
+ *
+ * الترتيب:
+ * 1. تحليل الرسالة (intent + objection + context)
+ * 2. Scoring (calculateScore)
+ * 3. Routing (resolveRoute)
+ * 4. تحديد stage + CTA
+ * 5. بناء system prompt بالنتائج
+ * 6. LLM يصيغ الرد فقط
+ */
+
 import type { ChatMessageInput } from "@/domain/chat";
-import type { CompanyProfile } from "@/domain/company";
-import { prisma } from "@/lib/db";
-import { searchKnowledge } from "@/lib/knowledge";
+import type { CompanyProfile }    from "@/domain/company";
+import { prisma }                 from "@/lib/db";
+import { searchKnowledge }        from "@/lib/knowledge";
 import { getConversationHistory, saveMessage } from "@/lib/agent/memory";
+import { calculateScore }                      from "@/lib/agent/scoring";
+import { resolveRoute, buildCtaButtons, stageLabel } from "@/lib/agent/routing";
+import type { ConversationPhase } from "@/domain/agent/conversation-state";
 
 const AGENT_CONTEXT_LIMIT = 12;
 
 type RunAgentTurnInput = {
-  companyId: string;
+  companyId:      string;
   companyProfile: CompanyProfile;
-  message: ChatMessageInput;
+  message:        ChatMessageInput;
 };
 
-type LeadState = {
-  score: number;
-  status: string;
-  temperature: "Hot" | "Warm" | "Cold" | "Unqualified";
-  intent: string;
-  needsHandoff: boolean;
-};
+type HistoryMsg = { sender: string; body: string };
 
+/* ─── Intent detection ─── */
+function detectIntent(message: string): string {
+  if (/أريد\s+(البدء|الاشتراك|الطلب|الشراء)|كيف\s+(أبدأ|أشترك|أسجل)/u.test(message)) return "booking";
+  if (/كم\s+(السعر|التكلفة|الثمن|يكلف|تكلف)|الأسعار|الباقات/u.test(message))           return "ask_price";
+  if (/عرض\s+سعر|أحتاج\s+عرض|عرض\s+مخصص/u.test(message))                              return "ask_quote";
+  if (/ما\s+(هي\s+)?(خدمات|خدمة|تقدمون|تقدم)|ما\s+الذي\s+تقدم/u.test(message))        return "service_inquiry";
+  if (/مرحبا|أهلا|السلام|هلا|hello|hi\b/iu.test(message))                               return "greeting";
+  if (/من\s+أنت|ما\s+اسمك|ما\s+هو\s+النظام/u.test(message))                            return "identity_question";
+  if (/ساعات\s+(العمل|الدوام)|متى\s+تفتح/u.test(message))                              return "hours_question";
+  if (/أين|موقع|عنوان|وين/u.test(message))                                              return "location_question";
+  if (/(غالي|غلي|مكلف|expensive|too\s+much)/iu.test(message))                           return "objection_price";
+  if (/(مو\s+محتاج|مش\s+محتاج|لست\s+مهتم|not\s+interested)/iu.test(message))           return "not_interested";
+  if (/(مهتم|مهتمة|يهمني|يهمنا|interested)/iu.test(message))                           return "purchase_intent";
+  if (/(ما\s+الفرق|كيف\s+يعمل|وضّح|اشرح)/u.test(message))                              return "capabilities_question";
+  return "general";
+}
+
+/* ─── Objection detection ─── */
+function detectObjection(message: string): { hasObjection: boolean; type: string } {
+  if (/(غالي|غلي|مكلف|السعر\s+عالي|expensive)/iu.test(message))          return { hasObjection: true, type: "PRICE" };
+  if (/(عندي\s+بديل|عندي\s+خيار|شركة\s+ثانية|أرخص)/u.test(message))      return { hasObjection: true, type: "COMPETITOR" };
+  if (/(سأفكر|راح\s+أفكر|بعدين|لاحقًا|مش\s+الوقت)/u.test(message))      return { hasObjection: true, type: "TIMING" };
+  if (/(مو\s+واثق|مش\s+واثق|احتاج\s+دليل|تثبت)/u.test(message))          return { hasObjection: true, type: "TRUST" };
+  if (/(ما\s+عندي\s+صلاحية|محتاج\s+أستشير|مدير)/u.test(message))         return { hasObjection: true, type: "AUTHORITY" };
+  return { hasObjection: false, type: "NONE" };
+}
+
+/* ─── Extract context from history ─── */
+function extractContextFromHistory(history: HistoryMsg[]) {
+  const joined = history.filter(m => m.sender === "CUSTOMER").map(m => m.body).join(" ");
+  const msgMatch  = joined.match(/(\d{1,5})\s*(?:رساله|رسالة|محادثه|محادثة)/u);
+  const teamMatch = joined.match(/(\d{1,3})\s*(?:أشخاص|اشخاص|موظف|شخص)\s*(?:يرد|يردون)/u);
+  return {
+    messagesPerDay: msgMatch  ? Number(msgMatch[1])  : undefined,
+    teamSize:       teamMatch ? Number(teamMatch[1]) : undefined,
+  };
+}
+
+/* ─── Missing fields ─── */
+function detectMissingFields(history: HistoryMsg[], context: { messagesPerDay?: number; teamSize?: number }): string[] {
+  const customerMsgs = history.filter(m => m.sender === "CUSTOMER").length;
+  if (customerMsgs < 1 || customerMsgs > 4) return [];
+  const fields: string[] = [];
+  if (!context.messagesPerDay) fields.push("messages_per_day");
+  if (!context.teamSize)       fields.push("team_size");
+  return fields;
+}
+
+/* ═══════════════════════════════════════════════════════ */
 export async function runAgentTurn({ companyId, companyProfile, message }: RunAgentTurnInput) {
-  // 1. Get or create conversation
-  const conversationContext = await getOrCreateConversation({
+
+  // 1. Get / create conversation
+  const ctx = await getOrCreateConversation({
     companyId,
-    conversationId: message.conversationId,
+    conversationId:   message.conversationId,
     visitorSessionId: message.visitorSessionId,
-    customerName: message.customerName,
-    customerEmail: message.customerEmail,
+    customerName:     message.customerName,
+    customerEmail:    message.customerEmail,
   });
 
-  // 2. Get conversation history
-  const history = await getConversationHistory(conversationContext.conversation.id, AGENT_CONTEXT_LIMIT);
+  // 2. Load history
+  const history = await getConversationHistory(ctx.conversation.id, AGENT_CONTEXT_LIMIT);
 
   // 3. Save customer message
-  await saveMessage({
-    conversationId: conversationContext.conversation.id,
-    sender: "CUSTOMER",
-    body: message.body,
-  });
+  await saveMessage({ conversationId: ctx.conversation.id, sender: "CUSTOMER", body: message.body });
 
-  // 4. Search knowledge base
-  const knowledgeResults = await searchKnowledge({
-    companyId,
-    query: message.body,
-    take: 4,
-  });
+  // 4. Knowledge search
+  const knowledgeResults = await searchKnowledge({ companyId, query: message.body, take: 4 });
 
-  // 5. Generate reply using LLM directly
-  const { reply, leadState } = await generateSmartReply({
-    customerMessage: message.body,
-    companyProfile,
+  // 5. Analyse message
+  const intent             = detectIntent(message.body);
+  const { hasObjection, type: objectionType } = detectObjection(message.body);
+  const extractedCtx       = extractContextFromHistory(history);
+  const missingFields      = detectMissingFields(history, extractedCtx);
+  const handoffRequested   = /(تحدث\s+مع\s+مندوب|أريد\s+مندوب|speak\s+to\s+human)/iu.test(message.body);
+  const previousScore      = (message as { leadSnapshot?: { score?: number } }).leadSnapshot?.score ?? ctx.lead.score ?? 0;
+
+  // 6. Scoring
+  const scoring = calculateScore({
+    intent,
+    stage:           (ctx.lead.buyingStage as ConversationPhase) ?? "DISCOVERY",
+    currentMessage:  message.body,
+    customerContext: {
+      facts:           [],
+      painPoints:      [],
+      previousAnswers: history.filter(m => m.sender === "CUSTOMER").map(m => m.body).slice(-4),
+      messagesPerDay:  extractedCtx.messagesPerDay,
+      teamSize:        extractedCtx.teamSize,
+    },
     history,
-    knowledgeResults,
-    lead: conversationContext.lead,
+    previousScore,
   });
 
-  // 6. Save AI reply
-  await saveMessage({
-    conversationId: conversationContext.conversation.id,
-    sender: "AI",
-    body: reply,
+  // 7. Routing
+  const routing = resolveRoute({
+    intent, scoring, currentMessage: message.body, history,
+    missingFields, hasObjection, objectionType, handoffRequested,
   });
 
-  // 7. Update lead
+  // 8. CTA buttons
+  const ctaButtons = buildCtaButtons(routing.ctaType, scoring.temperature);
+
+  // 9. Build system prompt
+  const systemPrompt = buildSystemPrompt({
+    companyProfile, knowledgeResults, scoring, routing,
+    intent, missingFields, hasObjection, objectionType, ctaButtons,
+  });
+
+  // 10. Call LLM
+  const messages = buildMessages(systemPrompt, history, message.body, ctx.lead);
+  const reply    = await callLLM(messages, companyProfile);
+
+  // 11. Save AI reply
+  await saveMessage({ conversationId: ctx.conversation.id, sender: "AI", body: reply });
+
+  // 12. Update lead
+  const newStatus = scoring.temperature === "Hot" ? "HOT"
+    : scoring.temperature === "Warm" ? "WARM"
+    : scoring.temperature === "Cold" ? "COLD" : "UNQUALIFIED";
+
   await prisma.lead.update({
-    where: { id: conversationContext.lead.id },
+    where: { id: ctx.lead.id },
     data: {
-      score: leadState.score,
-      lastSummary: `Intent: ${leadState.intent} | Temp: ${leadState.temperature}`,
+      score:       scoring.score,
+      status:      newStatus,
+      intent,
+      buyingStage: routing.stage,
+      route:       routing.route,
+      lastSummary: `Intent:${intent} | Stage:${routing.stage} | Score:${scoring.score} | Temp:${scoring.temperature}`,
+      agentMemory: {
+        lastIntent:      intent,
+        lastScore:       scoring.score,
+        lastTemperature: scoring.temperature,
+        lastStage:       routing.stage,
+        missingFields,
+        messagesPerDay:  extractedCtx.messagesPerDay,
+        teamSize:        extractedCtx.teamSize,
+        hasObjection,
+        objectionType,
+      },
     },
   });
 
+  // 13. Return
   return {
-    message: reply,
-    leadScore: leadState.score,
-    intent: leadState.intent,
-    temperature: leadState.temperature,
-    nextAction: "متابعة المحادثة",
-    conversationId: conversationContext.conversation.id,
-    leadId: conversationContext.lead.id,
-    knowledgeSources: [...new Set(knowledgeResults.map((r) => r.documentTitle))],
-    knowledgeSourceDetails: knowledgeResults.map((r) => ({
-      documentTitle: r.documentTitle,
-      content: r.content.slice(0, 360),
-      score: r.score,
-    })),
-    matchedKnowledge: knowledgeResults.map((r) => `${r.documentTitle}: ${r.content.slice(0, 140)}`),
-    aiProvider: process.env.AI_PROVIDER ?? "groq",
-    route: leadState.needsHandoff ? "HUMAN_HANDOFF" : "AI",
-    qualificationStatus: "DISCOVERING",
-    buyingStage: "DISCOVERY",
-    missingFields: [],
-    summary: "",
-    toolCalls: [],
+    message:                reply,
+    leadScore:              scoring.score,
+    intent,
+    temperature:            scoring.temperature,
+    nextAction:             routing.nextAction,
+    route:                  routing.route,
+    conversationId:         ctx.conversation.id,
+    leadId:                 ctx.lead.id,
+    qualificationStatus:    missingFields.length === 0 ? "QUALIFIED" : "DISCOVERING",
+    buyingStage:            routing.stage,
+    missingFields,
+    summary:                `Score:${scoring.score} | ${stageLabel(routing.stage)}`,
+    knowledgeSources:       [...new Set(knowledgeResults.map(r => r.documentTitle))],
+    knowledgeSourceDetails: knowledgeResults.map(r => ({ documentTitle: r.documentTitle, content: r.content.slice(0, 360), score: r.score })),
+    matchedKnowledge:       knowledgeResults.map(r => `${r.documentTitle}: ${r.content.slice(0, 140)}`),
+    aiProvider:             process.env.AI_PROVIDER ?? "groq",
+    toolCalls:              [],
+    ctaButtons,
+    scoringSignals:         scoring.signals,
   };
 }
 
-async function generateSmartReply({
-  customerMessage,
-  companyProfile,
-  history,
-  knowledgeResults,
-  lead,
-}: {
-  customerMessage: string;
-  companyProfile: CompanyProfile;
-  history: Array<{ sender: string; body: string }>;
+/* ─── System Prompt ─── */
+const DEFAULT_EXECUTION_RULES = `[الأوامر الإلزامية - أعلى أولوية]
+- يمنع استخدام أي رد جاهز أو عام.
+- يمنع البدء بسؤال. كل رد يبدأ بجملة فائدة أو إقناع ملموس.
+- إذا كانت رسالة العميل تحتوي على اعتراض → قدّم إقناعاً مباشراً أولاً ثم سؤالاً واحداً.
+- كل رد: فائدة مرتبطة بكلام العميل + سؤال واحد فقط.
+- يمنع اختراع معلومات غير موجودة في مصادر المعرفة.
+- إذا سأل العميل عن السعر → اذكر السعر مباشرة قبل أي إقناع.
+- إذا أظهر جاهزية → رشّح الباقة المناسبة وأعطِ خطوة بدء واضحة فوراً.`;
+
+function buildSystemPrompt(input: {
+  companyProfile:   CompanyProfile;
   knowledgeResults: Array<{ documentTitle: string; content: string; score: number }>;
-  lead: {
-    score: number;
-    status: string;
-    fullName?: string | null;
-    needsSummary?: string | null;
-  };
-}): Promise<{ reply: string; leadState: LeadState }> {
-  const provider = process.env.AI_PROVIDER ?? "groq";
+  scoring:          ReturnType<typeof calculateScore>;
+  routing:          ReturnType<typeof resolveRoute>;
+  intent:           string;
+  missingFields:    string[];
+  hasObjection:     boolean;
+  objectionType:    string;
+  ctaButtons:       ReturnType<typeof buildCtaButtons>;
+}): string {
+  const { companyProfile: p, knowledgeResults, scoring, routing, intent, missingFields, hasObjection, objectionType, ctaButtons } = input;
 
-  const systemPrompt = buildSystemPrompt(companyProfile, knowledgeResults);
-  const messages = buildMessages(systemPrompt, history, customerMessage, knowledgeResults, lead);
-
-  try {
-    let reply = "";
-
-    if (provider === "groq" && process.env.GROQ_API_KEY?.trim()) {
-      reply = await callGroq(messages);
-    } else if (provider === "gemini" && process.env.GEMINI_API_KEY?.trim()) {
-      reply = await callGemini(systemPrompt, history, customerMessage, knowledgeResults, lead);
-    } else {
-      reply = buildFallbackReply(companyProfile, customerMessage);
-    }
-
-    const leadState = extractLeadState(reply, lead);
-    const cleanReply = cleanResponse(reply);
-
-    log({ customerMessage, provider, reply: cleanReply, leadState });
-
-    return { reply: cleanReply, leadState };
-  } catch (error) {
-    console.error("LLM failed:", error);
-    return {
-      reply: buildFallbackReply(companyProfile, customerMessage),
-      leadState: { score: lead.score, status: lead.status, temperature: "Unqualified", intent: "unknown", needsHandoff: false },
-    };
-  }
-}
-
-// ─────────────────────────────────────────────────────────────────────────────
-// القواعد الإلزامية الافتراضية — تُستخدم إذا لم يُضبط companyProfile.executionRules
-// ─────────────────────────────────────────────────────────────────────────────
-const DEFAULT_EXECUTION_RULES = `[الأوامر الإلزامية - أعلى أولوية - طبّقها قبل كتابة أي كلمة]
-يجب الالتزام بهذه القواعد قبل أي رد:
-- يمنع استخدام أي رد جاهز أو عام مثل "شكراً لتواصلك" أو "يسعدني مساعدتك".
-- يمنع البدء بسؤال. كل رد يجب أن يبدأ بجملة فائدة أو إقناع ملموس.
-- إذا كانت رسالة العميل تحتوي على شك أو اعتراض (السعر غالي / غير مقتنع / سأفكر / عندي بديل) → قدّم إقناعاً مباشراً وربط القيمة بنتيجة ملموسة أولاً. يمنع تجاهل الاعتراض.
-- كل رد يجب أن يحتوي على: فائدة مرتبطة بكلام العميل + سؤال واحد فقط يساعد على التقدم.
-- يمنع تجاهل معلومات ذكرها العميل (متجر / ضغط / حجم فريق / مشكلة محددة). استخدمها في الرد.
-- يمنع اختراع معلومات أو عروض أو مزايا غير موجودة في مصادر المعرفة.
-- إذا سأل العميل عن السعر → اذكر السعر والباقات مباشرة من مصادر المعرفة قبل أي إقناع إضافي.
-- إذا سأل العميل "كيف أبدأ" أو أظهر جاهزية → رشّح الباقة المناسبة وأعطِ خطوة واضحة للبدء فوراً. لا تسأل أسئلة جديدة.
-- عند الاعتراض: لا تتراجع عن البيع. أعد تأطير القيمة بنتيجة ملموسة.
-- إذا لم يتم تطبيق هذه القواعد، يعتبر الرد غير صالح.`;
-
-function buildSystemPrompt(
-  companyProfile: CompanyProfile,
-  knowledgeResults: Array<{ documentTitle: string; content: string; score: number }>,
-): string {
-  const services = companyProfile.services
-    .map((s) => `- ${s.name}: ${s.description} | السعر: ${s.price}`)
-    .join("\n");
-
+  const services  = p.services.map(s => `- ${s.name}: ${s.description} | السعر: ${s.price}`).join("\n");
   const knowledge = knowledgeResults.length
     ? knowledgeResults.map((r, i) => `[${i + 1}] ${r.documentTitle}:\n${r.content.slice(0, 400)}`).join("\n\n")
     : "لا توجد معلومات إضافية.";
 
-  // === 1. الأوامر الإلزامية ===
-  // الأولوية: ما يُضبط من لوحة التحكم > القواعد الافتراضية المدمجة في الكود
-  const executionRules = companyProfile.executionRules?.trim()
-    ? `[الأوامر الإلزامية - أعلى أولوية - طبّقها قبل كتابة أي كلمة]\n${companyProfile.executionRules.trim()}`
+  const executionRules = p.executionRules?.trim()
+    ? `[الأوامر الإلزامية]\n${p.executionRules.trim()}`
     : DEFAULT_EXECUTION_RULES;
 
-  // === 2. تعريف الدور ===
-  const roleDefinition = `[تعريف الدور]
-أنت مندوب مبيعات محترف لشركة "${companyProfile.name}". تتحدث بالعربية فقط كإنسان حقيقي في شات مباشر. لا تذكر أنك AI أو بوت أو نظام.`;
+  const salesCtx = `[سياق العميل - محلَّل تلقائياً]
+النية: ${intent} | الدرجة: ${scoring.score}/100 | الحالة: ${scoring.temperature} | المرحلة: ${stageLabel(routing.stage)}
+المسار: ${routing.route} | الخطوة: ${routing.nextAction}${hasObjection ? ` | الاعتراض: ${objectionType}` : ""}${missingFields.length ? ` | حقول مفقودة: ${missingFields.join(",")}` : ""}${ctaButtons.length ? ` | CTA: ${ctaButtons.map(b => b.label).join(" | ")}` : ""}`;
 
-  // === 3. أسلوب الرد ===
-  const responseStyle = `[أسلوب الرد]
-- ودود، احترافي، مباشر
-- مختصر: 2-3 جمل فقط إلا إذا طُلب التفصيل
-- لا تكرر نفس الصياغة في ردود متتالية
-- استخدم سياق المحادثة دائماً
-- لا تبدأ بـ "بالطبع" أو "بالتأكيد" أو أي كلمة حشو`;
-
-  // === 4. قواعد البيع والاعتراضات ===
-  const salesRules = `[قواعد البيع والتعامل مع الاعتراضات]
-
-عند الاعتراض على السعر:
-اعترف + أعد تأطير القيمة بنتيجة ملموسة + اكشف السبب الحقيقي للتردد.
-مثال: "أتفهمك تماماً. كثير من عملائنا كانوا يفكرون بنفس الطريقة حتى رأوا كيف وفّر عليهم النظام ساعات يومياً وزاد مبيعاتهم. ما الذي يجعلك متردداً الآن - السعر تحديداً أم شيء آخر؟"
-
-عند سؤال عن السعر:
-اذكر السعر مباشرة + اشرح ما يشمله + سؤال يقرّب القرار.
-
-عند الاستكشاف (ما خدماتكم / كيف تعملون):
-اشرح الفائدة (ليس الميزات التقنية) + ربط بمشكلة العميل + سؤال يكشف وضعه.
-
-عند الجاهزية (كيف أبدأ / أريد الاشتراك):
-رشّح الباقة المناسبة + أعطِ خطوات بدء فورية محددة + اطلب تأكيداً.`;
-
-  // === 5. قواعد التصعيد ===
-  const handoffRules = `[قواعد التصعيد للمندوب البشري]
-${companyProfile.handoffRule || "صعّد فوراً عند: طلب صريح للتحدث مع شخص، شكوى أو غضب واضح، اعتراض معقد يحتاج تفاوض خاص على السعر."}`;
-
-  // === 6. مصادر المعرفة ===
-  const knowledgeBase = `[معلومات الشركة]
-الاسم: ${companyProfile.name} | المجال: ${companyProfile.industry}
-الوصف: ${companyProfile.description}
-الموقع: ${companyProfile.location} | ساعات العمل: ${companyProfile.workingHours}
-
-[الخدمات والأسعار - مرجع للحقائق فقط، لا تنسخ حرفياً]
-${services}
-
-[مصادر المعرفة المعتمدة - مرجع للحقائق فقط، أعد الصياغة بأسلوبك]
-${knowledge}`;
-
-  // === 7. تحليل الرد ===
-  const analysisInstruction = `[تحليل الرد - أضفه في نهاية كل رد بعد سطر فارغ]
-[ANALYSIS: intent=<greeting|price_inquiry|service_inquiry|booking|objection|follow_up|handoff_request|general>, score=<0-100>, temperature=<Hot|Warm|Cold|Unqualified>, handoff=<yes|no>]`;
+  const instruction = buildResponseInstruction(routing.route, routing.nextAction, scoring.temperature, hasObjection, objectionType, missingFields);
 
   return [
     executionRules,
     "",
-    roleDefinition,
+    `[تعريف الدور]\nأنت مندوب مبيعات محترف لشركة "${p.name}". تتحدث بالعربية فقط. لا تذكر أنك AI.`,
     "",
-    responseStyle,
+    salesCtx,
     "",
-    salesRules,
+    instruction,
     "",
-    handoffRules,
+    `[أسلوب الرد]\n${p.tone || "ودود، احترافي، مباشر. 2-3 جمل فقط."}\n- لا تبدأ بـ "بالطبع" أو "بالتأكيد" أو "شكراً لتواصلك".`,
     "",
-    knowledgeBase,
+    `[قواعد التصعيد]\n${p.handoffRule || "صعّد عند: طلب صريح لمندوب، شكوى، اعتراض معقد."}`,
     "",
-    analysisInstruction,
+    `[معلومات الشركة]\nالاسم: ${p.name} | المجال: ${p.industry}\n${p.description}\nالموقع: ${p.location} | ساعات العمل: ${p.workingHours}\n\n[الخدمات والأسعار]\n${services}\n\n[مصادر المعرفة]\n${knowledge}`,
   ].join("\n");
 }
 
+function buildResponseInstruction(
+  route: string, nextAction: string, temperature: string,
+  hasObjection: boolean, objectionType: string, missingFields: string[],
+): string {
+  if (route === "HUMAN_HANDOFF")
+    return `[تعليمات الرد]\nأخبر العميل أنك ستوصله بمندوب الآن. اجمع معلومة تواصل إذا لم تكن موجودة.`;
+
+  if (route === "BOOKING" || nextAction === "CONFIRM_READINESS")
+    return `[تعليمات الرد - إغلاق]\nرشّح الباقة المناسبة بسطر واحد + أعطِ خطوة بدء واضحة ومحددة. لا تسأل أسئلة جديدة.`;
+
+  if (hasObjection && objectionType === "PRICE")
+    return `[تعليمات الرد - اعتراض السعر]\n1. أعد تأطير القيمة بنتيجة ملموسة (توفير وقت / زيادة مبيعات)\n2. لا تتراجع عن السعر\n3. اكشف السبب: "هل الموضوع السعر تحديداً أم شيء آخر؟"`;
+
+  if (hasObjection)
+    return `[تعليمات الرد - اعتراض]\nاعترف + أعد تأطير + سؤال واحد يكشف السبب الحقيقي.`;
+
+  if (route === "PRESENT_OFFER" || nextAction === "PRESENT_PRICE")
+    return `[تعليمات الرد - عرض الأسعار]\nاذكر السعر والباقات مباشرة.\nثم: جملة تربط الباقة بوضع العميل + سؤال واحد يقرّب القرار.`;
+
+  if (nextAction === "BUILD_VALUE")
+    return `[تعليمات الرد - بناء القيمة]\nاشرح فائدة ملموسة (ليس ميزة تقنية) + ربط بمشكلة العميل + سؤال واحد.`;
+
+  if (nextAction === "ASK_QUALIFYING_QUESTION" && missingFields.length > 0) {
+    const q = missingFields[0] === "messages_per_day"
+      ? "كم رسالة تستقبلون يومياً تقريباً؟"
+      : "كم شخص يرد على رسائل العملاء حالياً؟";
+    return `[تعليمات الرد - تأهيل]\nابدأ بجملة فائدة قصيرة عن النظام ثم اسأل: "${q}"\nسؤال واحد فقط.`;
+  }
+
+  return `[تعليمات الرد]\nأجب على سؤال العميل بشكل مباشر ومفيد.\nأضف جملة تربط الإجابة بفائدة ملموسة.\nثم سؤال واحد فقط يساعد على التقدم.`;
+}
+
+/* ─── Messages builder ─── */
 function buildMessages(
   systemPrompt: string,
-  history: Array<{ sender: string; body: string }>,
-  customerMessage: string,
-  knowledgeResults: Array<{ documentTitle: string; content: string; score: number }>,
-  lead: { score: number; status: string; fullName?: string | null; needsSummary?: string | null },
+  history: HistoryMsg[],
+  currentMessage: string,
+  lead: { needsSummary?: string | null },
 ) {
-  const historyMessages = history.slice(-10).map((m) => ({
+  const hist = history.slice(-10).map(m => ({
     role: m.sender === "CUSTOMER" ? ("user" as const) : ("assistant" as const),
     content: m.body,
   }));
-
-  const contextNote = lead.needsSummary
-    ? `\n[معلومات العميل المعروفة: ${lead.needsSummary}]`
-    : "";
-
+  const note = lead.needsSummary ? `\n[معلومات العميل: ${lead.needsSummary}]` : "";
   return [
     { role: "system" as const, content: systemPrompt },
-    ...historyMessages,
-    { role: "user" as const, content: customerMessage + contextNote },
+    ...hist,
+    { role: "user" as const, content: currentMessage + note },
   ];
 }
 
-async function callGroq(
+/* ─── LLM caller ─── */
+async function callLLM(
   messages: Array<{ role: "system" | "user" | "assistant"; content: string }>,
+  companyProfile: CompanyProfile,
 ): Promise<string> {
-  const model = process.env.GROQ_MODEL ?? "llama-3.1-8b-instant";
+  const provider = process.env.AI_PROVIDER ?? "groq";
+  try {
+    if (provider === "groq" && process.env.GROQ_API_KEY?.trim())     return await callGroq(messages);
+    if (provider === "gemini" && process.env.GEMINI_API_KEY?.trim()) return await callGemini(messages);
+  } catch (err) { console.error("[LLM] failed:", err); }
+  return buildFallbackReply(companyProfile, messages[messages.length - 1]?.content ?? "");
+}
 
-  const response = await fetch("https://api.groq.com/openai/v1/chat/completions", {
+async function callGroq(messages: Array<{ role: "system" | "user" | "assistant"; content: string }>): Promise<string> {
+  const res  = await fetch("https://api.groq.com/openai/v1/chat/completions", {
     method: "POST",
-    headers: {
-      authorization: `Bearer ${process.env.GROQ_API_KEY ?? ""}`,
-      "content-type": "application/json",
-    },
-    body: JSON.stringify({
-      model,
-      temperature: 0.7,
-      max_tokens: 400,
-      messages,
-    }),
+    headers: { authorization: `Bearer ${process.env.GROQ_API_KEY ?? ""}`, "content-type": "application/json" },
+    body: JSON.stringify({ model: process.env.GROQ_MODEL ?? "llama-3.1-8b-instant", temperature: 0.7, max_tokens: 400, messages }),
   });
-
-  if (!response.ok) throw new Error(`Groq failed: ${response.status}`);
-
-  const data = (await response.json()) as { choices?: Array<{ message?: { content?: string } }> };
+  if (!res.ok) throw new Error(`Groq ${res.status}`);
+  const data = (await res.json()) as { choices?: Array<{ message?: { content?: string } }> };
   const text = data.choices?.[0]?.message?.content?.trim();
-  if (!text) throw new Error("Groq returned empty response");
-
+  if (!text) throw new Error("Groq empty");
   return text;
 }
 
-async function callGemini(
-  systemPrompt: string,
-  history: Array<{ sender: string; body: string }>,
-  customerMessage: string,
-  knowledgeResults: Array<{ documentTitle: string; content: string; score: number }>,
-  lead: { score: number; status: string; fullName?: string | null; needsSummary?: string | null },
-): Promise<string> {
-  const model = process.env.GEMINI_MODEL ?? "gemini-2.0-flash";
-  const messages = buildMessages(systemPrompt, history, customerMessage, knowledgeResults, lead);
-
-  const contents = messages
-    .filter((m) => m.role !== "system")
-    .map((m) => ({
-      role: m.role === "user" ? "user" : "model",
-      parts: [{ text: m.content }],
-    }));
-
-  const response = await fetch(
-    `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent`,
+async function callGemini(messages: Array<{ role: "system" | "user" | "assistant"; content: string }>): Promise<string> {
+  const systemMsg = messages.find(m => m.role === "system")?.content ?? "";
+  const contents  = messages.filter(m => m.role !== "system").map(m => ({ role: m.role === "user" ? "user" : "model", parts: [{ text: m.content }] }));
+  const res = await fetch(
+    `https://generativelanguage.googleapis.com/v1beta/models/${process.env.GEMINI_MODEL ?? "gemini-2.0-flash"}:generateContent`,
     {
       method: "POST",
-      headers: {
-        "content-type": "application/json",
-        "x-goog-api-key": process.env.GEMINI_API_KEY ?? "",
-      },
-      body: JSON.stringify({
-        system_instruction: { parts: [{ text: systemPrompt }] },
-        contents,
-        generationConfig: { temperature: 0.7, maxOutputTokens: 400 },
-      }),
+      headers: { "content-type": "application/json", "x-goog-api-key": process.env.GEMINI_API_KEY ?? "" },
+      body: JSON.stringify({ system_instruction: { parts: [{ text: systemMsg }] }, contents, generationConfig: { temperature: 0.7, maxOutputTokens: 400 } }),
     },
   );
-
-  if (!response.ok) throw new Error(`Gemini failed: ${response.status}`);
-
-  const data = (await response.json()) as {
-    candidates?: Array<{ content?: { parts?: Array<{ text?: string }> } }>;
-  };
-  const text = data.candidates?.[0]?.content?.parts?.map((p) => p.text).join("").trim();
-  if (!text) throw new Error("Gemini returned empty response");
-
+  if (!res.ok) throw new Error(`Gemini ${res.status}`);
+  const data = (await res.json()) as { candidates?: Array<{ content?: { parts?: Array<{ text?: string }> } }> };
+  const text = data.candidates?.[0]?.content?.parts?.map(p => p.text).join("").trim();
+  if (!text) throw new Error("Gemini empty");
   return text;
 }
 
-function extractLeadState(
-  reply: string,
-  lead: { score: number; status: string },
-): LeadState {
-  const analysisMatch = reply.match(/\[ANALYSIS:\s*([^\]]+)\]/i);
-
-  if (!analysisMatch) {
-    return {
-      score: lead.score,
-      status: lead.status,
-      temperature: scoreToTemperature(lead.score),
-      intent: "general",
-      needsHandoff: false,
-    };
-  }
-
-  const analysis = analysisMatch[1];
-  const intentMatch = analysis.match(/intent=([^,\]]+)/i);
-  const scoreMatch = analysis.match(/score=(\d+)/i);
-  const tempMatch = analysis.match(/temperature=([^,\]]+)/i);
-  const handoffMatch = analysis.match(/handoff=(yes|no)/i);
-
-  const score = scoreMatch ? Math.min(100, Math.max(0, parseInt(scoreMatch[1]))) : lead.score;
-  const temperature = (tempMatch?.[1]?.trim() as LeadState["temperature"]) ?? scoreToTemperature(score);
-
-  return {
-    score,
-    status: temperature === "Hot" ? "HOT" : temperature === "Warm" ? "WARM" : temperature === "Cold" ? "COLD" : "UNQUALIFIED",
-    temperature,
-    intent: intentMatch?.[1]?.trim() ?? "general",
-    needsHandoff: handoffMatch?.[1] === "yes",
-  };
+function buildFallbackReply(profile: CompanyProfile, msg: string): string {
+  if (/مرحبا|أهلا|السلام|هلا/u.test(msg)) return `أهلًا! يسعدني مساعدتك. كيف أقدر أخدمك اليوم؟`;
+  return `شكراً لتواصلك مع ${profile.name}. هل تريد معرفة المزيد عن خدماتنا؟`;
 }
 
-function cleanResponse(reply: string): string {
-  return reply.replace(/\n?\[ANALYSIS:[^\]]+\]/gi, "").trim();
-}
-
-function scoreToTemperature(score: number): LeadState["temperature"] {
-  if (score >= 80) return "Hot";
-  if (score >= 50) return "Warm";
-  if (score >= 20) return "Cold";
-  return "Unqualified";
-}
-
-function buildFallbackReply(companyProfile: CompanyProfile, customerMessage: string): string {
-  const isGreeting = /مرحبا|اهلا|السلام|hello|hi/iu.test(customerMessage);
-  if (isGreeting) {
-    return `أهلاً وسهلاً! يسعدني مساعدتك. كيف أقدر أساعدك اليوم؟`;
-  }
-  return `شكراً لتواصلك مع ${companyProfile.name}. يسعدني مساعدتك، هل تريد معرفة المزيد عن خدماتنا؟`;
-}
-
-function log(payload: Record<string, unknown>) {
-  if (process.env.AGENT_DEBUG !== "1" && process.env.NODE_ENV !== "development") return;
-  console.log("[AI_AGENT_TURN]", payload);
-}
-
-async function getOrCreateConversation({
-  companyId,
-  conversationId,
-  visitorSessionId,
-  customerName,
-  customerEmail,
-}: {
-  companyId: string;
-  conversationId?: string;
-  visitorSessionId?: string;
-  customerName?: string;
-  customerEmail?: string;
+/* ─── Conversation get/create ─── */
+async function getOrCreateConversation(input: {
+  companyId: string; conversationId?: string; visitorSessionId?: string;
+  customerName?: string; customerEmail?: string;
 }) {
-  if (conversationId) {
-    const conversation = await prisma.conversation.findFirst({
-      where: {
-        id: conversationId,
-        companyId,
-        ...(visitorSessionId ? { visitorSessionId } : {}),
-      },
+  if (input.conversationId) {
+    const conv = await prisma.conversation.findFirst({
+      where: { id: input.conversationId, companyId: input.companyId },
       include: { lead: { include: { service: true } } },
     });
-
-    if (conversation) return { conversation, lead: conversation.lead };
+    if (conv) return { conversation: conv, lead: conv.lead };
   }
 
   const lead = await prisma.lead.create({
     include: { service: true },
-    data: {
-      companyId,
-      fullName: customerName || "زائر Web Chat",
-      email: customerEmail,
-      channel: "WEB_CHAT",
-      status: "NEW",
-      score: 0,
-    },
+    data: { companyId: input.companyId, fullName: input.customerName || "زائر Web Chat", email: input.customerEmail, channel: "WEB_CHAT", status: "NEW", score: 0 },
   });
-
   const conversation = await prisma.conversation.create({
-    data: {
-      companyId,
-      leadId: lead.id,
-      visitorSessionId,
-      channel: "WEB_CHAT",
-      status: "OPEN",
-    },
+    data: { companyId: input.companyId, leadId: lead.id, visitorSessionId: input.visitorSessionId, channel: "WEB_CHAT", status: "OPEN" },
   });
-
   return { conversation, lead };
 }
