@@ -9,6 +9,8 @@ type CompanyWithServices = {
   workingHours: string | null;
   location: string | null;
   handoffRules: unknown;
+  // حقل الأوامر الإلزامية الجديد
+  executionRules: string | null;
   services: Array<{
     name: string;
     priceLabel: string | null;
@@ -52,6 +54,8 @@ function toCompanyProfile(company: CompanyWithServices): CompanyProfile {
     workingHours: company.workingHours ?? "",
     location: company.location ?? "",
     handoffRule: formatHandoffRules(company.handoffRules),
+    // إذا لم يُضبط من لوحة التحكم، يُرجع string فارغ → runtime.ts يستخدم القواعد الافتراضية
+    executionRules: company.executionRules ?? "",
     services: company.services.map((service) => ({
       name: service.name,
       price: service.priceLabel ?? (service.basePrice ? `${service.basePrice.toString()} USD` : "حسب الطلب"),

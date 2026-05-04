@@ -15,6 +15,7 @@ datasource db {
 enum UserRole {
   OWNER
   ADMIN
+  
   SALES_MANAGER
   SALES_AGENT
 }
@@ -125,41 +126,46 @@ enum KnowledgeDocumentStatus {
 }
 
 model Company {
-  id          String   @id @default(cuid())
-  name        String
-  slug        String   @unique
-  industry    String?
-  description String?
-  location    String?
+  id           String   @id @default(cuid())
+  name         String
+  slug         String   @unique
+  industry     String?
+  description  String?
+  location     String?
   workingHours String?
   handoffRules Json?
-  timezone    String   @default("Asia/Amman")
-  aiPersona   String?
-  createdAt   DateTime @default(now())
-  updatedAt   DateTime @updatedAt
+  timezone     String   @default("Asia/Amman")
+  aiPersona    String?
+  // ──────────────────────────────────────────────────────
+  // الأوامر الإلزامية: قواعد عليا تُحقن أول الـ system prompt
+  // قابلة للتعديل من لوحة التحكم دون لمس الكود
+  executionRules String?
+  // ──────────────────────────────────────────────────────
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
 
-  users         User[]
-  services      Service[]
-  leads         Lead[]
-  conversations Conversation[]
-  integrations  Integration[]
-  followUps     FollowUp[]
-  aiRuns        AiRun[]
-  auditLogs     AuditLog[]
-  sessions      Session[]
+  users              User[]
+  services           Service[]
+  leads              Lead[]
+  conversations      Conversation[]
+  integrations       Integration[]
+  followUps          FollowUp[]
+  aiRuns             AiRun[]
+  auditLogs          AuditLog[]
+  sessions           Session[]
   knowledgeDocuments KnowledgeDocument[]
   knowledgeChunks    KnowledgeChunk[]
 }
 
 model User {
-  id        String   @id @default(cuid())
-  companyId String
-  name      String
-  email     String   @unique
+  id           String   @id @default(cuid())
+  companyId    String
+  name         String
+  email        String   @unique
   passwordHash String
-  role      UserRole @default(SALES_AGENT)
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
+  role         UserRole @default(SALES_AGENT)
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
 
   company  Company   @relation(fields: [companyId], references: [id], onDelete: Cascade)
   messages Message[]
@@ -184,7 +190,7 @@ model Service {
   companyId   String
   name        String
   description String?
-  priceLabel   String?
+  priceLabel  String?
   basePrice   Decimal?
   isActive    Boolean  @default(true)
   createdAt   DateTime @default(now())
@@ -197,34 +203,34 @@ model Service {
 }
 
 model Lead {
-  id               String     @id @default(cuid())
-  companyId        String
-  serviceId        String?
-  fullName         String?
-  phone            String?
-  email            String?
-  city             String?
-  companyName      String?
-  channel          ChannelType
-  status           LeadStatus @default(NEW)
-  score            Int        @default(0)
-  intent           String?
-  customerType     CustomerType?
-  preferredContact String?
-  budget           String?
-  timeline         String?
-  decisionMaker    Boolean?
-  needsSummary     String?
+  id                  String              @id @default(cuid())
+  companyId           String
+  serviceId           String?
+  fullName            String?
+  phone               String?
+  email               String?
+  city                String?
+  companyName         String?
+  channel             ChannelType
+  status              LeadStatus          @default(NEW)
+  score               Int                 @default(0)
+  intent              String?
+  customerType        CustomerType?
+  preferredContact    String?
+  budget              String?
+  timeline            String?
+  decisionMaker       Boolean?
+  needsSummary        String?
   qualificationStatus QualificationStatus @default(UNKNOWN)
-  buyingStage      BuyingStage @default(NEW)
-  route            LeadRoute?
+  buyingStage         BuyingStage         @default(NEW)
+  route               LeadRoute?
   qualificationSignals Json?
-  missingFields    Json?
-  agentMemory      Json?
-  lastSummary      String?
-  lostReason       String?
-  createdAt        DateTime   @default(now())
-  updatedAt        DateTime   @updatedAt
+  missingFields        Json?
+  agentMemory          Json?
+  lastSummary          String?
+  lostReason           String?
+  createdAt            DateTime            @default(now())
+  updatedAt            DateTime            @updatedAt
 
   company       Company        @relation(fields: [companyId], references: [id], onDelete: Cascade)
   service       Service?       @relation(fields: [serviceId], references: [id], onDelete: SetNull)
@@ -239,18 +245,18 @@ model Lead {
 }
 
 model Conversation {
-  id        String             @id @default(cuid())
-  companyId String
-  leadId    String
+  id               String             @id @default(cuid())
+  companyId        String
+  leadId           String
   visitorSessionId String?
-  channel   ChannelType
-  status    ConversationStatus @default(OPEN)
-  startedAt DateTime           @default(now())
-  closedAt  DateTime?
-  updatedAt DateTime           @updatedAt
+  channel          ChannelType
+  status           ConversationStatus @default(OPEN)
+  startedAt        DateTime           @default(now())
+  closedAt         DateTime?
+  updatedAt        DateTime           @updatedAt
 
-  company Company  @relation(fields: [companyId], references: [id], onDelete: Cascade)
-  lead    Lead     @relation(fields: [leadId], references: [id], onDelete: Cascade)
+  company  Company   @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  lead     Lead      @relation(fields: [leadId], references: [id], onDelete: Cascade)
   messages Message[]
   aiRuns   AiRun[]
 
@@ -290,17 +296,17 @@ model Deal {
 }
 
 model FollowUp {
-  id        String         @id @default(cuid())
-  companyId String
-  leadId    String
-  kind      FollowUpKind   @default(CHECK_DECISION)
+  id          String         @id @default(cuid())
+  companyId   String
+  leadId      String
+  kind        FollowUpKind   @default(CHECK_DECISION)
   sequenceKey String?
-  stepNumber Int           @default(1)
-  status    FollowUpStatus @default(SCHEDULED)
-  message   String
-  dueAt     DateTime
-  sentAt    DateTime?
-  createdAt DateTime       @default(now())
+  stepNumber  Int            @default(1)
+  status      FollowUpStatus @default(SCHEDULED)
+  message     String
+  dueAt       DateTime
+  sentAt      DateTime?
+  createdAt   DateTime       @default(now())
 
   company Company @relation(fields: [companyId], references: [id], onDelete: Cascade)
   lead    Lead    @relation(fields: [leadId], references: [id], onDelete: Cascade)
@@ -310,13 +316,13 @@ model FollowUp {
 }
 
 model Handoff {
-  id        String        @id @default(cuid())
-  leadId    String
-  userId    String?
-  reason    String
-  summary   String
-  status    HandoffStatus @default(PENDING)
-  createdAt DateTime      @default(now())
+  id         String        @id @default(cuid())
+  leadId     String
+  userId     String?
+  reason     String
+  summary    String
+  status     HandoffStatus @default(PENDING)
+  createdAt  DateTime      @default(now())
   resolvedAt DateTime?
 
   lead Lead  @relation(fields: [leadId], references: [id], onDelete: Cascade)
@@ -355,30 +361,30 @@ model AiRun {
 }
 
 model KnowledgeDocument {
-  id        String   @id @default(cuid())
-  companyId String
-  title     String
-  status    KnowledgeDocumentStatus @default(CURRENT)
-  sourceType String   @default("TEXT")
+  id         String                  @id @default(cuid())
+  companyId  String
+  title      String
+  status     KnowledgeDocumentStatus @default(CURRENT)
+  sourceType String                  @default("TEXT")
   sourceName String?
-  content   String
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
+  content    String
+  createdAt  DateTime                @default(now())
+  updatedAt  DateTime                @updatedAt
 
-  company Company @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  company Company          @relation(fields: [companyId], references: [id], onDelete: Cascade)
   chunks  KnowledgeChunk[]
 }
 
 model KnowledgeChunk {
-  id        String   @id @default(cuid())
-  companyId String
+  id         String   @id @default(cuid())
+  companyId  String
   documentId String
-  content   String
-  embedding Json?
-  position  Int
-  createdAt DateTime @default(now())
+  content    String
+  embedding  Json?
+  position   Int
+  createdAt  DateTime @default(now())
 
-  company  Company @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  company  Company           @relation(fields: [companyId], references: [id], onDelete: Cascade)
   document KnowledgeDocument @relation(fields: [documentId], references: [id], onDelete: Cascade)
 
   @@index([companyId])

@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { Loader2, Plus, Save, Trash2 } from "lucide-react";
+import { AlertTriangle, Loader2, Plus, Save, Trash2 } from "lucide-react";
 import { CompanyProfile, defaultCompanyProfile } from "@/domain/company";
 
 export function CompanySettingsForm() {
@@ -31,18 +31,13 @@ export function CompanySettingsForm() {
     const services = profile.services.map((service, serviceIndex) =>
       serviceIndex === index ? { ...service, [key]: value } : service,
     );
-
     update("services", services);
   }
 
   function addService() {
     update("services", [
       ...profile.services,
-      {
-        name: "خدمة جديدة",
-        price: "حسب الطلب",
-        description: "اكتب وصف الخدمة هنا.",
-      },
+      { name: "خدمة جديدة", price: "حسب الطلب", description: "اكتب وصف الخدمة هنا." },
     ]);
   }
 
@@ -86,20 +81,21 @@ export function CompanySettingsForm() {
 
   return (
     <div className="space-y-4">
+      {/* ── بيانات الشركة + شخصية المساعد ── */}
       <section className="grid gap-4 xl:grid-cols-[1fr_1fr]">
         <div className="app-card p-5">
           <h3 className="font-semibold">بيانات الشركة</h3>
           <div className="mt-4 grid gap-3 sm:grid-cols-2">
-            <Field label="اسم الشركة" value={profile.name} onChange={(value) => update("name", value)} />
-            <Field label="الصناعة" value={profile.industry} onChange={(value) => update("industry", value)} />
-            <Field label="ساعات العمل" value={profile.workingHours} onChange={(value) => update("workingHours", value)} />
-            <Field label="الموقع" value={profile.location} onChange={(value) => update("location", value)} />
+            <Field label="اسم الشركة"   value={profile.name}         onChange={(v) => update("name", v)} />
+            <Field label="الصناعة"       value={profile.industry}     onChange={(v) => update("industry", v)} />
+            <Field label="ساعات العمل"  value={profile.workingHours} onChange={(v) => update("workingHours", v)} />
+            <Field label="الموقع"        value={profile.location}     onChange={(v) => update("location", v)} />
           </div>
           <label className="mt-3 block">
             <span className="text-sm font-medium">وصف الشركة</span>
             <textarea
               value={profile.description}
-              onChange={(event) => update("description", event.target.value)}
+              onChange={(e) => update("description", e.target.value)}
               className="field-shell mt-2 min-h-24 w-full resize-y rounded-md p-3 text-sm leading-7 outline-none"
             />
           </label>
@@ -111,7 +107,7 @@ export function CompanySettingsForm() {
             <span className="text-sm font-medium">أسلوب الرد</span>
             <textarea
               value={profile.tone}
-              onChange={(event) => update("tone", event.target.value)}
+              onChange={(e) => update("tone", e.target.value)}
               className="field-shell mt-2 min-h-24 w-full resize-y rounded-md p-3 text-sm leading-7 outline-none"
             />
           </label>
@@ -119,13 +115,72 @@ export function CompanySettingsForm() {
             <span className="text-sm font-medium">قواعد التصعيد لمندوب</span>
             <textarea
               value={profile.handoffRule}
-              onChange={(event) => update("handoffRule", event.target.value)}
+              onChange={(e) => update("handoffRule", e.target.value)}
               className="field-shell mt-2 min-h-24 w-full resize-y rounded-md p-3 text-sm leading-7 outline-none"
             />
           </label>
         </div>
       </section>
 
+      {/* ── الأوامر الإلزامية ── */}
+      <section className="app-card p-5">
+        {/* رأس القسم */}
+        <div className="mb-3 flex items-start gap-3">
+          <span
+            className="mt-0.5 flex h-6 w-6 shrink-0 items-center justify-center rounded-md"
+            style={{ background: "rgba(239,68,68,.12)", color: "#ef4444" }}
+            aria-hidden="true"
+          >
+            <AlertTriangle size={14} />
+          </span>
+          <div>
+            <h3 className="font-semibold" style={{ color: "var(--text-1)" }}>
+              الأوامر الإلزامية
+            </h3>
+            <p className="mt-1 text-sm" style={{ color: "var(--text-3)", lineHeight: 1.6 }}>
+              قواعد عليا تُحقن في <strong>أول</strong> الـ system prompt وتأخذ أولوية على كل الأقسام الأخرى.
+              إذا تُركت <strong>فارغة</strong>، يُستخدم تلقائيًا النص الافتراضي المدمج في الكود.
+            </p>
+          </div>
+        </div>
+
+        {/* شريط تحذير */}
+        <div
+          className="mb-3 rounded-md px-3 py-2 text-sm"
+          style={{
+            background: "rgba(239,68,68,.06)",
+            border: "1px solid rgba(239,68,68,.2)",
+            color: "#b91c1c",
+            lineHeight: 1.6,
+          }}
+        >
+          ⚠️ هذا القسم يتحكم في سلوك الموديل بشكل مباشر. تأكد من صياغة القواعد بدقة قبل الحفظ.
+        </div>
+
+        <label className="block">
+          <span className="text-sm font-medium" style={{ color: "var(--text-2)" }}>
+            نص الأوامر الإلزامية
+          </span>
+          <textarea
+            value={profile.executionRules}
+            onChange={(e) => update("executionRules", e.target.value)}
+            placeholder={`مثال:
+- يمنع استخدام أي رد جاهز أو عام.
+- يمنع البدء بسؤال.
+- كل رد يجب أن يبدأ بجملة فائدة أو إقناع ملموس.
+- إذا سأل العميل عن السعر → اذكر السعر مباشرة قبل أي إقناع.
+- يمنع اختراع معلومات غير موجودة في مصادر المعرفة.`}
+            className="field-shell mt-2 w-full resize-y rounded-md p-3 font-mono text-sm leading-7 outline-none"
+            style={{ minHeight: 180, direction: "rtl" }}
+          />
+        </label>
+
+        <p className="mt-2 text-xs" style={{ color: "var(--text-3)" }}>
+          اتركها فارغة للاعتماد على القواعد الافتراضية المدمجة · كل سطر = قاعدة مستقلة
+        </p>
+      </section>
+
+      {/* ── الخدمات والأسعار ── */}
       <section className="app-card overflow-hidden">
         <div className="flex flex-wrap items-center justify-between gap-3 border-b border-slate-200 px-5 py-4">
           <div>
@@ -134,30 +189,31 @@ export function CompanySettingsForm() {
               هذه المعلومات يستخدمها المساعد عند الرد وتحليل رسائل العملاء.
             </p>
           </div>
-          <button onClick={addService} className="btn-secondary inline-flex h-10 items-center gap-2 rounded-md px-3 text-sm">
+          <button
+            onClick={addService}
+            className="btn-secondary inline-flex h-10 items-center gap-2 rounded-md px-3 text-sm"
+          >
             <Plus size={16} aria-hidden="true" />
             إضافة خدمة
           </button>
         </div>
         <div className="divide-y divide-slate-100">
-          {profile.services.length ? profile.services.map((service, index) => (
-            <div key={index} className="grid gap-3 p-4 lg:grid-cols-[1fr_220px_1.4fr_44px]">
-              <Field label="اسم الخدمة" value={service.name} onChange={(value) => updateService(index, "name", value)} />
-              <Field label="السعر" value={service.price} onChange={(value) => updateService(index, "price", value)} />
-              <Field
-                label="الوصف"
-                value={service.description}
-                onChange={(value) => updateService(index, "description", value)}
-              />
-              <button
-                onClick={() => removeService(index)}
-                className="mt-7 inline-flex size-11 items-center justify-center rounded-md border border-rose-100 bg-rose-50 text-rose-700 transition hover:bg-rose-100"
-                aria-label="حذف الخدمة"
-              >
-                <Trash2 size={16} aria-hidden="true" />
-              </button>
-            </div>
-          )) : (
+          {profile.services.length ? (
+            profile.services.map((service, index) => (
+              <div key={index} className="grid gap-3 p-4 lg:grid-cols-[1fr_220px_1.4fr_44px]">
+                <Field label="اسم الخدمة" value={service.name}        onChange={(v) => updateService(index, "name", v)} />
+                <Field label="السعر"       value={service.price}       onChange={(v) => updateService(index, "price", v)} />
+                <Field label="الوصف"       value={service.description} onChange={(v) => updateService(index, "description", v)} />
+                <button
+                  onClick={() => removeService(index)}
+                  className="mt-7 inline-flex size-11 items-center justify-center rounded-md border border-rose-100 bg-rose-50 text-rose-700 transition hover:bg-rose-100"
+                  aria-label="حذف الخدمة"
+                >
+                  <Trash2 size={16} aria-hidden="true" />
+                </button>
+              </div>
+            ))
+          ) : (
             <div className="p-5 text-sm text-slate-500">
               لا توجد خدمات مضافة بعد. يمكن للمساعد الاعتماد على مصادر المعرفة، أو أضف خدمة وسعرها من الزر أعلاه.
             </div>
@@ -165,17 +221,22 @@ export function CompanySettingsForm() {
         </div>
       </section>
 
+      {/* ── حفظ ── */}
       <div className="flex flex-wrap items-center gap-2">
         <button
           onClick={handleSave}
           disabled={saving}
           className="btn-primary inline-flex h-11 items-center gap-2 rounded-md px-4 text-sm font-medium disabled:cursor-not-allowed disabled:opacity-60"
         >
-          {saving ? <Loader2 size={17} className="animate-spin" aria-hidden="true" /> : <Save size={17} aria-hidden="true" />}
+          {saving ? (
+            <Loader2 size={17} className="animate-spin" aria-hidden="true" />
+          ) : (
+            <Save size={17} aria-hidden="true" />
+          )}
           حفظ الإعدادات
         </button>
-        {saved ? <span className="text-sm font-medium text-teal-700">تم الحفظ في قاعدة البيانات.</span> : null}
-        {error ? <span className="text-sm font-medium text-rose-600">{error}</span> : null}
+        {saved  ? <span className="text-sm font-medium text-teal-700">تم الحفظ في قاعدة البيانات.</span> : null}
+        {error  ? <span className="text-sm font-medium text-rose-600">{error}</span>                        : null}
       </div>
     </div>
   );
@@ -187,7 +248,7 @@ function Field({ label, value, onChange }: { label: string; value: string; onCha
       <span className="text-sm font-medium">{label}</span>
       <input
         value={value}
-        onChange={(event) => onChange(event.target.value)}
+        onChange={(e) => onChange(e.target.value)}
         className="field-shell mt-2 h-11 w-full rounded-md px-3 text-sm outline-none"
       />
     </label>

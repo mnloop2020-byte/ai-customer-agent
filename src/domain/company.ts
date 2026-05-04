@@ -19,6 +19,9 @@ export const companyProfileSchema = z.object({
   workingHours: z.string().trim().default(""),
   location: z.string().trim().default(""),
   handoffRule: z.string().trim().default(""),
+  // الأوامر الإلزامية: قواعد عليا تُحقن أول الـ system prompt
+  // إذا كانت فارغة يُستخدم الـ default المدمج في runtime.ts
+  executionRules: z.string().trim().default(""),
   services: z.array(serviceSchema).default([]),
   faqs: z.array(faqSchema).default([]),
 });
@@ -34,6 +37,8 @@ export const defaultCompanyProfile: CompanyProfile = {
   location: "اسطنبول، تركيا",
   handoffRule:
     "حوّل العميل لمندوب عند طلب عرض مخصص، سؤال تقني متقدم، اهتمام واضح بالشراء، غضب أو عدم رضا، سؤال خارج نطاق الخدمات، طلب تواصل مباشر، أو سؤال فوترة ودفع.",
+  // تُترك فارغة في الـ default → runtime.ts يستخدم القواعد المدمجة
+  executionRules: "",
   services: [
     {
       name: "بناء أنظمة ذكاء اصطناعي",
