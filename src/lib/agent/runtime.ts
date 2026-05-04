@@ -149,13 +149,28 @@ export async function runAgentTurn({ companyId, companyProfile, message }: RunAg
     : scoring.temperature === "Warm" ? "WARM"
     : scoring.temperature === "Cold" ? "COLD" : "UNQUALIFIED";
 
+  // map ConversationPhase → Prisma BuyingStage enum
+  const phaseToStage: Record<string, string> = {
+    OPENING:            "NEW",
+    DISCOVERY:          "DISCOVERY",
+    QUALIFICATION:      "QUALIFICATION",
+    VALUE_BUILDING:     "QUALIFICATION",
+    OBJECTION_HANDLING: "NEGOTIATION",
+    OFFER:              "OFFER",
+    CLOSING:            "NEGOTIATION",
+    FOLLOW_UP:          "FOLLOW_UP",
+    HANDOFF:            "NEGOTIATION",
+    LOST:               "LOST",
+  };
+  const prismaBuyingStage = phaseToStage[routing.stage] ?? "DISCOVERY";
+
   await prisma.lead.update({
     where: { id: ctx.lead.id },
     data: {
       score:       scoring.score,
       status:      newStatus,
       intent,
-      buyingStage: routing.stage,
+      buyingStage: prismaBuyingStage as never,
       route:       routing.route,
       lastSummary: `Intent:${intent} | Stage:${routing.stage} | Score:${scoring.score} | Temp:${scoring.temperature}`,
       agentMemory: {
