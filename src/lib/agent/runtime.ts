@@ -303,7 +303,7 @@ function buildExecutionContract(
   }
 
   // ── CLOSING / BOOKING ──
- if (stage === "OFFER" || stage === "OBJECTION_HANDLING") {
+  if (stage === "CLOSING" || route === "BOOKING" || nextAction === "CONFIRM_READINESS") {
     return `${header}
     
 ⚠️ هذا عقد تنفيذي ملزم:
