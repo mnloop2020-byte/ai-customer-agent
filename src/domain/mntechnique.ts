@@ -17,6 +17,8 @@ export const mntechniqueProfile: CompanyProfile = {
     "إذا كان السؤال يتعلق بالفوترة أو الدفع يتم تحويله لقسم المبيعات.",
     "إذا خارج ساعات العمل يتم تسجيل الطلب وإبلاغ العميل أنه سيتم التواصل لاحقًا.",
   ].join("\n"),
+  // تُترك فارغة → runtime.ts يستخدم القواعد الافتراضية المدمجة
+  executionRules: "",
   services: [
     {
       name: "بناء أنظمة ذكاء اصطناعي",
@@ -36,4 +38,3 @@ export const mntechniqueProfile: CompanyProfile = {
     },
   ],
 };
-
