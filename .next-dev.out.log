@@ -9,3 +9,16 @@
 ✓ Ready in 493ms
 Creating turbopack project { dir: 'D:\\AI agent for customer\\ai-customer-agent', testMode: true }
 
+ GET /login 200 in 879ms (next.js: 140ms, proxy.ts: 4ms, application-code: 736ms)
+ GET /login 200 in 76ms (next.js: 4ms, proxy.ts: 10ms, application-code: 61ms)
+ POST /api/auth/login 401 in 592ms (next.js: 504ms, proxy.ts: 6ms, application-code: 81ms)
+ POST /api/auth/login 401 in 51ms (next.js: 4ms, proxy.ts: 8ms, application-code: 40ms)
+ POST /api/auth/login 401 in 47ms (next.js: 4ms, proxy.ts: 6ms, application-code: 38ms)
+ POST /api/auth/login 401 in 47ms (next.js: 4ms, proxy.ts: 6ms, application-code: 37ms)
+ GET /login 200 in 50ms (next.js: 4ms, proxy.ts: 4ms, application-code: 42ms)
+ POST /api/auth/login 401 in 45ms (next.js: 2ms, proxy.ts: 6ms, application-code: 37ms)
+ GET /login 200 in 89ms (next.js: 8ms, proxy.ts: 10ms, application-code: 71ms)
+ POST /api/auth/login 401 in 60ms (next.js: 4ms, proxy.ts: 6ms, application-code: 51ms)
+ POST /api/auth/login 401 in 91ms (next.js: 4ms, proxy.ts: 10ms, application-code: 78ms)
+ POST /api/auth/login 401 in 52ms (next.js: 2ms, proxy.ts: 5ms, application-code: 45ms)
+ POST /api/auth/login 429 in 14ms (next.js: 3ms, proxy.ts: 5ms, application-code: 6ms)
