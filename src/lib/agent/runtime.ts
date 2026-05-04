@@ -332,7 +332,7 @@ function buildExecutionContract(
 `;
   }
   // ── OBJECTION_HANDLING ──
-  if (stage === "OBJECTION_HANDLING" || hasObjection) {
+  if (hasObjection) {
     if (objectionType === "PRICE") {
       return `${header}
 الإجراء الإلزامي — اعتراض السعر:
