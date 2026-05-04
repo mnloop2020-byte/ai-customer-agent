@@ -51,6 +51,8 @@ export async function PUT(request: Request) {
         workingHours: parsed.data.workingHours,
         aiPersona: parsed.data.tone,
         handoffRules: parsed.data.handoffRule.split("\n").filter(Boolean),
+        // حفظ الأوامر الإلزامية — null إذا كانت فارغة
+        executionRules: parsed.data.executionRules?.trim() || null,
       },
     });
 
